@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">PDF QR Signer</string>
+    <string name="title_sign_pdf">Tanda Tangani PDF</string>
+    <string name="title_history">Riwayat Dokumen</string>
+    <string name="btn_pick_pdf">Pilih File PDF</string>
+    <string name="btn_sample_pdf">Gunakan PDF Sampel</string>
+    <string name="btn_process_sign">Proses &amp; Tempel QR</string>
+    <string name="label_signer">Nama Penandatangan (Signer):</string>
+    <string name="label_doc_title">Nama / Judul Dokumen:</string>
+    <string name="placeholder_target">Target Placeholder: ${ttd_pengirim1}</string>
+</resources>
