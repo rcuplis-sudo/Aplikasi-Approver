@@ -81,7 +81,7 @@ class PdfSignerService(
 
             val baseDp = 75f
             val basePts = 85f
-            val qrSizePts = ((customPlacement.qrSizeDp / baseDp) * basePts).coerceIn(40f, 160f)
+            val qrSizePts = ((customPlacement.qrSizeDp / baseDp) * basePts).coerceIn(20f, 160f)
             // In PDF coordinate space, (0,0) is bottom-left, while in visual/screen it's top-left
             val pdfX = (customPlacement.normalizedX * box.width).coerceIn(10f, box.width - qrSizePts - 10f)
             val pdfY = ((1f - customPlacement.normalizedY) * box.height - qrSizePts).coerceIn(15f, box.height - qrSizePts - 15f)
@@ -263,7 +263,7 @@ class PdfSignerService(
                 Triple(match.x, match.y, size)
             }
             DetectionMethod.MANUAL_DRAG -> {
-                val size = match.width.coerceIn(35f, 180f)
+                val size = match.width.coerceIn(20f, 180f)
                 Triple(match.x, match.y, size)
             }
         }

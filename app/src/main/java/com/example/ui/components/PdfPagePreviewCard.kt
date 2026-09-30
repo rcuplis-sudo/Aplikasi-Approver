@@ -4,7 +4,9 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -58,6 +61,16 @@ fun PdfPagePreviewCard(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
+    var zoomScale by remember { mutableFloatStateOf(1.0f) }
+    var panOffsetX by remember { mutableFloatStateOf(0f) }
+    var panOffsetY by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(currentPage, previewBitmap) {
+        zoomScale = 1.0f
+        panOffsetX = 0f
+        panOffsetY = 0f
+    }
+
     val previewQrBitmap = remember(qrOverlayConfig, signerName) {
         try {
             QrCodeGenerator.generateQrBitmap(
@@ -224,9 +237,10 @@ fun PdfPagePreviewCard(
                         // Title & Current Size Badge
                         val currentSizeVal = customPlacement?.qrSizeDp ?: 75f
                         val sizeCategory = when {
-                            currentSizeVal <= 55f -> "Kecil"
-                            currentSizeVal <= 85f -> "Sedang"
-                            currentSizeVal <= 110f -> "Besar"
+                            currentSizeVal < 35f -> "Mikro (Sangat Kecil)"
+                            currentSizeVal < 55f -> "Kecil"
+                            currentSizeVal < 80f -> "Sedang"
+                            currentSizeVal < 105f -> "Besar"
                             else -> "Ekstra Besar"
                         }
 
@@ -272,16 +286,16 @@ fun PdfPagePreviewCard(
                         ) {
                             IconButton(
                                 onClick = {
-                                    val next = (currentSizeVal - 10f).coerceAtLeast(45f)
+                                    val next = (currentSizeVal - 5f).coerceAtLeast(25f)
                                     onSizeChanged(next)
                                 },
                                 modifier = Modifier.size(36.dp),
-                                enabled = currentSizeVal > 45f
+                                enabled = currentSizeVal > 25f
                             ) {
                                 Icon(
                                     Icons.Default.Remove,
                                     contentDescription = "Perkecil ukuran QR",
-                                    tint = if (currentSizeVal > 45f) MaterialTheme.colorScheme.primary else Color.Gray,
+                                    tint = if (currentSizeVal > 25f) MaterialTheme.colorScheme.primary else Color.Gray,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -289,8 +303,8 @@ fun PdfPagePreviewCard(
                             Slider(
                                 value = currentSizeVal,
                                 onValueChange = { onSizeChanged(it) },
-                                valueRange = 45f..130f,
-                                steps = 16,
+                                valueRange = 25f..130f,
+                                steps = 20,
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("qr_size_slider")
@@ -298,7 +312,7 @@ fun PdfPagePreviewCard(
 
                             IconButton(
                                 onClick = {
-                                    val next = (currentSizeVal + 10f).coerceAtMost(130f)
+                                    val next = (currentSizeVal + 5f).coerceAtMost(130f)
                                     onSizeChanged(next)
                                 },
                                 modifier = Modifier.size(36.dp),
@@ -313,26 +327,27 @@ fun PdfPagePreviewCard(
                             }
                         }
 
-                        // Preset buttons: Kecil (55dp), Sedang (75dp), Besar (100dp), Ekstra (125dp)
+                        // Preset buttons: Mikro (28dp), Kecil (45dp), Sedang (70dp), Besar (95dp), Ekstra (125dp)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             listOf(
-                                Triple("Kecil", 55f, "55dp"),
-                                Triple("Sedang", 75f, "75dp"),
-                                Triple("Besar", 100f, "100dp"),
+                                Triple("Mikro", 28f, "28dp"),
+                                Triple("Kecil", 45f, "45dp"),
+                                Triple("Sedang", 70f, "70dp"),
+                                Triple("Besar", 95f, "95dp"),
                                 Triple("Ekstra", 125f, "125dp")
                             ).forEach { (label, presetVal, subLabel) ->
-                                val isSelected = kotlin.math.abs(currentSizeVal - presetVal) <= 6f
+                                val isSelected = kotlin.math.abs(currentSizeVal - presetVal) <= 5f
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = { onSizeChanged(presetVal) },
                                     label = {
                                         Text(
                                             text = "$label\n$subLabel",
-                                            fontSize = 10.sp,
-                                            lineHeight = 12.sp,
+                                            fontSize = 9.sp,
+                                            lineHeight = 11.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                         )
                                     },
@@ -341,8 +356,51 @@ fun PdfPagePreviewCard(
                             }
                         }
 
+                        // Micro-Positioning D-Pad Controls (Nudge 1% for placing small QR precisely)
+                        val normX = customPlacement?.normalizedX ?: 0.65f
+                        val normY = customPlacement?.normalizedY ?: 0.75f
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Presisi Geser (1%):",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                OutlinedIconButton(
+                                    onClick = { onPositionChanged((normX - 0.015f).coerceAtLeast(0f), normY) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Geser Kiri", modifier = Modifier.size(18.dp))
+                                }
+                                OutlinedIconButton(
+                                    onClick = { onPositionChanged(normX, (normY - 0.015f).coerceAtLeast(0f)) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Geser Atas", modifier = Modifier.size(18.dp))
+                                }
+                                OutlinedIconButton(
+                                    onClick = { onPositionChanged(normX, (normY + 0.015f).coerceAtMost(1f)) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Geser Bawah", modifier = Modifier.size(18.dp))
+                                }
+                                OutlinedIconButton(
+                                    onClick = { onPositionChanged((normX + 0.015f).coerceAtMost(1f), normY) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Geser Kanan", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+
                         Text(
-                            text = "💡 Geser slider atau ketuk preset di atas untuk mengubah dimensi QR. Sentuh & seret kotak QR di bawah ke posisi dokumen yang diinginkan.",
+                            text = "💡 Geser slider atau ketuk preset (misal: Mikro 28dp). Gunakan tombol Zoom di bawah untuk memperbesar dokumen dan menempelkan QR code kecil secara presisi.",
                             style = MaterialTheme.typography.bodySmall,
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -375,20 +433,159 @@ fun PdfPagePreviewCard(
                 }
             }
 
+            // Zoom Controls Bar for Enlarge / Zooming In to Place Small QR Precisely
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = CardDefaults.outlinedCardBorder(),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.ZoomIn,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Zoom Preview PDF",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Stepper (- % +) & Reset
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    val newZoom = (zoomScale - 0.5f).coerceAtLeast(1.0f)
+                                    zoomScale = newZoom
+                                    if (newZoom == 1.0f) {
+                                        panOffsetX = 0f
+                                        panOffsetY = 0f
+                                    }
+                                },
+                                enabled = zoomScale > 1.0f,
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(Icons.Default.ZoomOut, contentDescription = "Perkecil Zoom", modifier = Modifier.size(18.dp))
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (zoomScale > 1f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.clickable {
+                                    zoomScale = 1.0f
+                                    panOffsetX = 0f
+                                    panOffsetY = 0f
+                                }
+                            ) {
+                                Text(
+                                    text = "${(zoomScale * 100).roundToInt()}%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (zoomScale > 1f) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    val newZoom = (zoomScale + 0.5f).coerceAtMost(3.5f)
+                                    zoomScale = newZoom
+                                },
+                                enabled = zoomScale < 3.5f,
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(Icons.Default.ZoomIn, contentDescription = "Perbesar Zoom", modifier = Modifier.size(18.dp))
+                            }
+
+                            if (zoomScale > 1.0f || panOffsetX != 0f || panOffsetY != 0f) {
+                                TextButton(
+                                    onClick = {
+                                        zoomScale = 1.0f
+                                        panOffsetX = 0f
+                                        panOffsetY = 0f
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Reset 1x", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    // Quick Zoom Level Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            1.0f to "1x Fit",
+                            1.5f to "1.5x",
+                            2.0f to "2x Detail",
+                            3.0f to "3x Mikro"
+                        ).forEach { (scale, label) ->
+                            val isSelected = kotlin.math.abs(zoomScale - scale) < 0.1f
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    zoomScale = scale
+                                    if (scale == 1.0f) {
+                                        panOffsetX = 0f
+                                        panOffsetY = 0f
+                                    }
+                                },
+                                label = { Text(label, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+
             // Preview Display Area with Touch-and-Drag Overlay
             var imageContainerSize by remember { mutableStateOf(IntSize.Zero) }
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 260.dp, max = 400.dp)
+                    .heightIn(min = 280.dp, max = 460.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFFE2E8F0))
                     .border(
                         width = if (isManualPlacementMode) 2.dp else 1.dp,
                         color = if (isManualPlacementMode) MaterialTheme.colorScheme.primary else Color(0xFFCBD5E1),
                         shape = RoundedCornerShape(12.dp)
-                    ),
+                    )
+                    .pointerInput(imageContainerSize) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            val newZoom = (zoomScale * zoom).coerceIn(1.0f, 3.5f)
+                            zoomScale = newZoom
+                            if (newZoom > 1.0f && imageContainerSize.width > 0 && imageContainerSize.height > 0) {
+                                val maxPanX = (imageContainerSize.width * (newZoom - 1f)) / 2f
+                                val maxPanY = (imageContainerSize.height * (newZoom - 1f)) / 2f
+                                panOffsetX = (panOffsetX + pan.x).coerceIn(-maxPanX, maxPanX)
+                                panOffsetY = (panOffsetY + pan.y).coerceIn(-maxPanY, maxPanY)
+                            } else {
+                                panOffsetX = 0f
+                                panOffsetY = 0f
+                            }
+                        }
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 if (isLoading) {
@@ -412,6 +609,12 @@ fun PdfPagePreviewCard(
                     Box(
                         modifier = Modifier
                             .padding(12.dp)
+                            .graphicsLayer {
+                                scaleX = zoomScale
+                                scaleY = zoomScale
+                                translationX = panOffsetX
+                                translationY = panOffsetY
+                            }
                             .shadow(8.dp, RoundedCornerShape(4.dp))
                             .background(Color.White)
                             .onGloballyPositioned { coordinates ->
@@ -453,7 +656,7 @@ fun PdfPagePreviewCard(
 
                             val isInteractive = isManualPlacementMode
                             val dragModifier = if (isInteractive) {
-                                Modifier.pointerInput(imageContainerSize) {
+                                Modifier.pointerInput(imageContainerSize, zoomScale) {
                                     detectDragGestures(
                                         onDragEnd = {
                                             val finalNormX = if (maxOffsetX > 0) (currentPixelX / maxOffsetX).coerceIn(0f, 1f) else 0.5f
@@ -462,8 +665,10 @@ fun PdfPagePreviewCard(
                                         }
                                     ) { change, dragAmount ->
                                         change.consume()
-                                        currentPixelX = (currentPixelX + dragAmount.x).coerceIn(0f, maxOffsetX)
-                                        currentPixelY = (currentPixelY + dragAmount.y).coerceIn(0f, maxOffsetY)
+                                        val deltaX = dragAmount.x / zoomScale
+                                        val deltaY = dragAmount.y / zoomScale
+                                        currentPixelX = (currentPixelX + deltaX).coerceIn(0f, maxOffsetX)
+                                        currentPixelY = (currentPixelY + deltaY).coerceIn(0f, maxOffsetY)
                                     }
                                 }
                             } else {
@@ -548,6 +753,70 @@ fun PdfPagePreviewCard(
                                             )
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    // Floating Pan Navigator overlay when zoomed in
+                    if (zoomScale > 1.0f) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                            border = CardDefaults.outlinedCardBorder(),
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val maxPan = (imageContainerSize.width * (zoomScale - 1f)) / 2f
+                                        panOffsetX = (panOffsetX + 60f).coerceIn(-maxPan, maxPan)
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Geser Kiri", modifier = Modifier.size(18.dp))
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val maxPan = (imageContainerSize.height * (zoomScale - 1f)) / 2f
+                                        panOffsetY = (panOffsetY + 60f).coerceIn(-maxPan, maxPan)
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Geser Atas", modifier = Modifier.size(18.dp))
+                                }
+                                IconButton(
+                                    onClick = {
+                                        panOffsetX = 0f
+                                        panOffsetY = 0f
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.CenterFocusStrong, contentDescription = "Pusatkan Tampilan", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val maxPan = (imageContainerSize.height * (zoomScale - 1f)) / 2f
+                                        panOffsetY = (panOffsetY - 60f).coerceIn(-maxPan, maxPan)
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Geser Bawah", modifier = Modifier.size(18.dp))
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val maxPan = (imageContainerSize.width * (zoomScale - 1f)) / 2f
+                                        panOffsetX = (panOffsetX - 60f).coerceIn(-maxPan, maxPan)
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Geser Kanan", modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
