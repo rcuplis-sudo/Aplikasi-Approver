@@ -9,10 +9,10 @@ import com.tom_roush.pdfbox.text.TextPosition
 import java.io.StringWriter
 
 /**
- * Searches for a text string within a PDDocument and determines
- * the exact page and coordinates (x, y, width, height) in PDF coordinate space.
+ * Searches for all occurrences of a text string or pattern within a PDDocument
+ * and determines the exact page and coordinates (x, y, width, height) in PDF coordinate space.
  */
-class PdfTextLocator(private val targetText: String) : PDFTextStripper() {
+class PdfTextLocator(private val targetTextOrRegex: String) : PDFTextStripper() {
 
     private val allPositions = mutableListOf<CharPosition>()
     private var currentPageIndex = 0
@@ -41,10 +41,10 @@ class PdfTextLocator(private val targetText: String) : PDFTextStripper() {
     }
 
     /**
-     * Executes the search across all pages of the document.
-     * Returns PlaceholderMatch if found, or null otherwise.
+     * Executes search across all pages of the document, finding ALL matching occurrences.
      */
-    fun findTarget(document: PDDocument): PlaceholderMatch? {
+    fun findAllTargets(document: PDDocument): List<PlaceholderMatch> {
+        val allMatches = mutableListOf<PlaceholderMatch>()
         val totalPages = document.numberOfPages
         for (pageIdx in 0 until totalPages) {
             currentPageIndex = pageIdx
@@ -57,16 +57,21 @@ class PdfTextLocator(private val targetText: String) : PDFTextStripper() {
             val dummyWriter = StringWriter()
             writeText(document, dummyWriter)
 
-            val match = TextPositionMatcher.searchInPositions(
+            val matchesOnPage = TextPositionMatcher.searchAllInPositions(
                 positions = allPositions,
-                target = targetText,
+                targetTextOrRegex = targetTextOrRegex,
                 pageIndex = pageIdx,
                 pageHeight = currentPageHeight
             )
-            if (match != null) {
-                return match
-            }
+            allMatches.addAll(matchesOnPage)
         }
-        return null
+        return allMatches
+    }
+
+    /**
+     * Backward-compatible single match search.
+     */
+    fun findTarget(document: PDDocument): PlaceholderMatch? {
+        return findAllTargets(document).firstOrNull()
     }
 }

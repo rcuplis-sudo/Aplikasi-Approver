@@ -17,7 +17,8 @@ object PdfSampleGenerator {
     enum class SampleType {
         TEXT_PLACEHOLDER,
         ACROFORM_FIELD,
-        NO_PLACEHOLDER_FALLBACK
+        NO_PLACEHOLDER_FALLBACK,
+        MULTI_PLACEHOLDER // Has 2 or more placeholders: ${ttd_pengirim1} and ${ttd_pengirim2}
     }
 
     fun generateSample(context: Context, type: SampleType): File {
@@ -30,6 +31,7 @@ object PdfSampleGenerator {
             SampleType.TEXT_PLACEHOLDER -> "dokumen_placeholder_teks.pdf"
             SampleType.ACROFORM_FIELD -> "dokumen_acroform_field.pdf"
             SampleType.NO_PLACEHOLDER_FALLBACK -> "dokumen_tanpa_placeholder_fallback.pdf"
+            SampleType.MULTI_PLACEHOLDER -> "dokumen_multi_placeholder_2_pihak.pdf"
         }
         val file = File(outputDir, fileName)
 
@@ -42,6 +44,7 @@ object PdfSampleGenerator {
                 SampleType.TEXT_PLACEHOLDER -> writeTextPlaceholderContent(doc, page)
                 SampleType.ACROFORM_FIELD -> writeAcroFormContent(doc, page)
                 SampleType.NO_PLACEHOLDER_FALLBACK -> writeFallbackContent(doc, page)
+                SampleType.MULTI_PLACEHOLDER -> writeMultiPlaceholderContent(doc, page)
             }
 
             FileOutputStream(file).use { out ->
@@ -105,6 +108,76 @@ object PdfSampleGenerator {
             stream.setFont(PDType1Font.HELVETICA_OBLIQUE, 9f)
             stream.newLineAtOffset(350f, 165f)
             stream.showText("NIP. 19850412 201012 1 004")
+            stream.endText()
+
+        } finally {
+            stream.close()
+        }
+    }
+
+    private fun writeMultiPlaceholderContent(doc: PDDocument, page: PDPage) {
+        val stream = PDPageContentStream(doc, page)
+        try {
+            stream.beginText()
+            stream.setFont(PDType1Font.HELVETICA_BOLD, 16f)
+            stream.newLineAtOffset(50f, 750f)
+            stream.showText("PERJANJIAN KERJASAMA DUA BELAH PIHAK")
+            stream.endText()
+
+            stream.beginText()
+            stream.setFont(PDType1Font.HELVETICA, 11f)
+            stream.newLineAtOffset(50f, 710f)
+            stream.showText("Nomor Kontrak: MOU/2026/XI/DUAL-SIGN")
+            stream.endText()
+
+            stream.beginText()
+            stream.setFont(PDType1Font.HELVETICA, 10f)
+            stream.newLineAtOffset(50f, 670f)
+            stream.showText("Dokumen ini memiliki 2 placeholder tanda tangan digital yang berbeda.")
+            stream.endText()
+
+            stream.beginText()
+            stream.setFont(PDType1Font.HELVETICA, 10f)
+            stream.newLineAtOffset(50f, 650f)
+            stream.showText("Aplikasi secara otomatis mendeteksi keduanya dan menempelkan QR code pada masing-masing posisi:")
+            stream.endText()
+
+            // --- Pihak Pertama (Kiri) ---
+            stream.beginText()
+            stream.setFont(PDType1Font.HELVETICA_BOLD, 11f)
+            stream.newLineAtOffset(70f, 320f)
+            stream.showText("PIHAK PERTAMA (Pengirim)")
+            stream.endText()
+
+            stream.beginText()
+            stream.setFont(PDType1Font.COURIER_BOLD, 12f)
+            stream.newLineAtOffset(70f, 250f)
+            stream.showText("\${ttd_pengirim1}")
+            stream.endText()
+
+            stream.beginText()
+            stream.setFont(PDType1Font.HELVETICA, 10f)
+            stream.newLineAtOffset(70f, 180f)
+            stream.showText("Budi Santoso, S.T.")
+            stream.endText()
+
+            // --- Pihak Kedua (Kanan) ---
+            stream.beginText()
+            stream.setFont(PDType1Font.HELVETICA_BOLD, 11f)
+            stream.newLineAtOffset(350f, 320f)
+            stream.showText("PIHAK KEDUA (Penerima)")
+            stream.endText()
+
+            stream.beginText()
+            stream.setFont(PDType1Font.COURIER_BOLD, 12f)
+            stream.newLineAtOffset(350f, 250f)
+            stream.showText("\${ttd_pengirim2}")
+            stream.endText()
+
+            stream.beginText()
+            stream.setFont(PDType1Font.HELVETICA, 10f)
+            stream.newLineAtOffset(350f, 180f)
+            stream.showText("Ir. Siti Rahmawati, M.M.")
             stream.endText()
 
         } finally {

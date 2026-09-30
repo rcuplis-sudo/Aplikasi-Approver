@@ -3,7 +3,8 @@ package com.example.model
 enum class DetectionMethod {
     ACROFORM,
     TEXT_SEARCH,
-    FALLBACK
+    FALLBACK,
+    MANUAL_DRAG
 }
 
 data class PlaceholderMatch(

@@ -12,14 +12,23 @@ interface SignedDocumentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(document: SignedDocumentEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(documents: List<SignedDocumentEntity>)
+
     @Query("SELECT * FROM signed_documents ORDER BY timestamp DESC")
     fun getAllDocuments(): Flow<List<SignedDocumentEntity>>
+
+    @Query("SELECT * FROM signed_documents ORDER BY timestamp DESC")
+    suspend fun getAllDocumentsList(): List<SignedDocumentEntity>
 
     @Query("SELECT * FROM signed_documents WHERE id = :id")
     suspend fun getDocumentById(id: String): SignedDocumentEntity?
 
     @Query("DELETE FROM signed_documents WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM signed_documents")
+    suspend fun deleteAll()
 
     @Delete
     suspend fun delete(document: SignedDocumentEntity)

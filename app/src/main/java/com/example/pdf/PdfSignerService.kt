@@ -5,14 +5,15 @@ import android.graphics.Bitmap
 import android.net.Uri
 import com.example.data.local.SignedDocumentEntity
 import com.example.data.repository.SignedDocumentRepository
+import com.example.model.CustomQrPlacement
 import com.example.model.DetectionMethod
 import com.example.model.PlaceholderMatch
+import com.example.model.QrOverlayConfig
 import com.example.model.SignatureQrPayload
 import com.example.qr.QrCodeGenerator
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
-import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,7 +28,9 @@ data class SigningResult(
     val payload: SignatureQrPayload,
     val qrBitmap: Bitmap,
     val match: PlaceholderMatch,
-    val signedFile: File
+    val signedFile: File,
+    val allMatches: List<PlaceholderMatch> = listOf(match),
+    val signaturesCount: Int = 1
 )
 
 class PdfSignerService(
@@ -41,13 +44,17 @@ class PdfSignerService(
 
     /**
      * Signs a PDF provided via Uri or File.
+     * If customPlacement is specified, the QR is stamped exactly at the custom position (touch-and-drag).
+     * Otherwise, automatically finds all placeholders in the document.
      */
     suspend fun signPdf(
         documentTitle: String,
         signerName: String,
         inputSource: Any, // Uri or File or ByteArray
         originalFileName: String,
-        customPlaceholder: String = "\${ttd_pengirim1}"
+        customPlaceholder: String = "\${ttd_pengirim1}",
+        qrOverlayConfig: QrOverlayConfig? = null,
+        customPlacement: CustomQrPlacement? = null
     ): SigningResult = withContext(Dispatchers.IO) {
         val inputBytes: ByteArray = when (inputSource) {
             is Uri -> {
@@ -63,31 +70,85 @@ class PdfSignerService(
         // 1. Calculate Document Hash (SHA-256)
         val docHash = calculateSha256(inputBytes)
 
-        // 2. Load PDF and Detect Placeholder (AcroForm, Text Search, or Fallback)
+        // 2. Load PDF and Determine Placeholders
         val document = PDDocument.load(inputBytes)
-        val detector = PdfPlaceholderDetector(customPlaceholder)
-        val match = detector.detectPlaceholder(document)
 
-        // 3. Prepare QR Payload JSON
-        val signatureId = UUID.randomUUID().toString()
+        val allMatches: List<PlaceholderMatch> = if (customPlacement != null) {
+            val pageCount = document.numberOfPages.coerceAtLeast(1)
+            val targetPageIdx = customPlacement.pageIndex.coerceIn(0, pageCount - 1)
+            val page = document.getPage(targetPageIdx)
+            val box = page.cropBox ?: page.mediaBox
+
+            val qrSizePts = 85f
+            // In PDF coordinate space, (0,0) is bottom-left, while in visual/screen it's top-left
+            val pdfX = (customPlacement.normalizedX * box.width).coerceIn(10f, box.width - qrSizePts - 10f)
+            val pdfY = ((1f - customPlacement.normalizedY) * box.height - qrSizePts).coerceIn(15f, box.height - qrSizePts - 15f)
+
+            listOf(
+                PlaceholderMatch(
+                    pageIndex = targetPageIdx,
+                    x = pdfX,
+                    y = pdfY,
+                    width = qrSizePts,
+                    height = qrSizePts,
+                    source = DetectionMethod.MANUAL_DRAG,
+                    fieldName = "Manual Drag & Drop",
+                    details = "Posisi QR ditentukan manual via Touch-and-Drag di Halaman ${targetPageIdx + 1}"
+                )
+            )
+        } else {
+            val detector = PdfPlaceholderDetector(customPlaceholder)
+            detector.detectAllPlaceholders(document)
+        }
+
+        val primaryMatch = allMatches.first()
+
+        // 3. Prepare QR Payloads & Embed QR Code into EACH detected placeholder
+        val baseSignatureId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
-        val payload = SignatureQrPayload(
-            doc = documentTitle.ifBlank { originalFileName },
-            signer = signerName.ifBlank { "Penandatangan Resmi" },
-            ts = timestamp,
-            id = signatureId,
-            hash = docHash
-        )
-        val payloadJson = payload.toJson()
 
-        // 4. Generate QR Code Bitmap with ZXing
-        val qrBitmap = QrCodeGenerator.generateQrBitmap(payloadJson, 350, 350)
+        var firstQrBitmap: Bitmap? = null
+        var primaryPayload: SignatureQrPayload? = null
 
-        // 5. Embed QR Code into PDF at coordinates
         try {
-            embedQrToDocument(document, match, qrBitmap, signatureId, signerName)
+            allMatches.forEachIndexed { index, match ->
+                val signIndex = index + 1
+                val sigId = if (allMatches.size > 1) "$baseSignatureId-$signIndex" else baseSignatureId
+                val effectiveSigner = if (allMatches.size > 1) {
+                    val signSuffix = match.fieldName ?: "Pihak $signIndex"
+                    "$signerName ($signSuffix)"
+                } else {
+                    signerName.ifBlank { "Penandatangan Resmi" }
+                }
 
-            // 6. Save Signed Document to App Files Directory
+                val payload = SignatureQrPayload(
+                    doc = documentTitle.ifBlank { originalFileName },
+                    signer = effectiveSigner,
+                    ts = timestamp,
+                    id = sigId,
+                    hash = docHash
+                )
+
+                if (index == 0) {
+                    primaryPayload = payload
+                }
+
+                // Generate QR Code Bitmap with ZXing (with center logo/initials if configured)
+                val qrBitmap = QrCodeGenerator.generateQrBitmap(
+                    content = payload.toJson(),
+                    width = 350,
+                    height = 350,
+                    overlayConfig = qrOverlayConfig
+                )
+                if (index == 0) {
+                    firstQrBitmap = qrBitmap
+                }
+
+                // Embed QR to Document at match coordinates
+                embedQrToDocument(document, match, qrBitmap, sigId, effectiveSigner, signIndex, allMatches.size)
+            }
+
+            // 4. Save Signed Document to App Files Directory
             val outputDir = File(context.filesDir, "signed_pdfs")
             if (!outputDir.exists()) outputDir.mkdirs()
 
@@ -99,32 +160,48 @@ class PdfSignerService(
                 document.save(outStream)
             }
 
-            // 7. Save History to Room
+            // 5. Save History to Room
+            val detectionSummary = when {
+                allMatches.size > 1 -> "Ditemukan ${allMatches.size} placeholder. Seluruh ${allMatches.size} posisi berhasil ditandatangani otomatis."
+                primaryMatch.source == DetectionMethod.MANUAL_DRAG -> primaryMatch.details
+                else -> primaryMatch.details
+            }
+
+            val finalPayload = primaryPayload ?: SignatureQrPayload(
+                doc = documentTitle.ifBlank { originalFileName },
+                signer = signerName,
+                ts = timestamp,
+                id = baseSignatureId,
+                hash = docHash
+            )
+
             val entity = SignedDocumentEntity(
-                id = signatureId,
-                documentTitle = payload.doc,
-                signerName = payload.signer,
+                id = baseSignatureId,
+                documentTitle = finalPayload.doc,
+                signerName = if (allMatches.size > 1) "$signerName (${allMatches.size} Tanda Tangan)" else finalPayload.signer,
                 timestamp = timestamp,
                 sha256Hash = docHash,
-                qrPayloadJson = payloadJson,
+                qrPayloadJson = finalPayload.toJson(),
                 originalFileName = originalFileName,
                 signedFilePath = signedFile.absolutePath,
-                pageIndex = match.pageIndex,
-                posX = match.x,
-                posY = match.y,
-                detectionMethod = match.source.name,
-                fallbackUsed = match.source == DetectionMethod.FALLBACK,
-                detectionDetails = match.details
+                pageIndex = primaryMatch.pageIndex,
+                posX = primaryMatch.x,
+                posY = primaryMatch.y,
+                detectionMethod = if (allMatches.size > 1) "MULTI_${primaryMatch.source.name}" else primaryMatch.source.name,
+                fallbackUsed = primaryMatch.source == DetectionMethod.FALLBACK,
+                detectionDetails = detectionSummary
             )
 
             repository.insertDocument(entity)
 
             return@withContext SigningResult(
                 entity = entity,
-                payload = payload,
-                qrBitmap = qrBitmap,
-                match = match,
-                signedFile = signedFile
+                payload = finalPayload,
+                qrBitmap = firstQrBitmap ?: QrCodeGenerator.generateQrBitmap(finalPayload.toJson(), 350, 350),
+                match = primaryMatch,
+                signedFile = signedFile,
+                allMatches = allMatches,
+                signaturesCount = allMatches.size
             )
         } finally {
             document.close()
@@ -136,7 +213,9 @@ class PdfSignerService(
         match: PlaceholderMatch,
         qrBitmap: Bitmap,
         sigId: String,
-        signerName: String
+        signerName: String,
+        signatureNumber: Int,
+        totalSignatures: Int
     ) {
         val targetPage = document.getPage(match.pageIndex)
         val pageBox = targetPage.cropBox ?: targetPage.mediaBox
@@ -162,6 +241,10 @@ class PdfSignerService(
                 val size = 90f
                 Triple(match.x, match.y, size)
             }
+            DetectionMethod.MANUAL_DRAG -> {
+                val size = match.width.coerceIn(60f, 120f)
+                Triple(match.x, match.y, size)
+            }
         }
 
         val contentStream = PDPageContentStream(
@@ -173,15 +256,8 @@ class PdfSignerService(
         )
 
         try {
-            // Draw the QR Code image
+            // Draw ONLY the QR Code image (no text underneath)
             contentStream.drawImage(qrImage, drawX, drawY, qrSize, qrSize)
-
-            // Draw a subtle digital signature annotation label
-            contentStream.beginText()
-            contentStream.setFont(PDType1Font.HELVETICA_BOLD, 7f)
-            contentStream.newLineAtOffset(drawX, (drawY - 9f).coerceAtLeast(10f))
-            contentStream.showText("DIGITALLY SIGNED • ID: ${sigId.take(8)}")
-            contentStream.endText()
         } finally {
             contentStream.close()
         }

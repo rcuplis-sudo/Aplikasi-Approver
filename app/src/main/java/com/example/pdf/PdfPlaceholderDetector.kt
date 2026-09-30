@@ -11,51 +11,74 @@ class PdfPlaceholderDetector(
 ) {
 
     /**
-     * Attempts detection in priority order:
-     * 1. AcroForm field matching placeholder target or "ttd_pengirim1"
-     * 2. Text search for literal placeholder "${ttd_pengirim1}"
-     * 3. Fallback to bottom-right corner of the last page
+     * Detects ALL placeholder locations in document.
+     * When there are multiple placeholders (e.g. ${ttd_pengirim1}, ${ttd_pengirim2}, multiple AcroForms,
+     * or multiple occurrences of a placeholder), all locations are detected.
      */
-    fun detectPlaceholder(document: PDDocument): PlaceholderMatch {
-        // 1. Check AcroForm
-        val acroFormMatch = detectAcroFormField(document)
-        if (acroFormMatch != null) {
-            return acroFormMatch
-        }
+    fun detectAllPlaceholders(document: PDDocument): List<PlaceholderMatch> {
+        val results = mutableListOf<PlaceholderMatch>()
 
-        // 2. Check Text Search
+        // 1. Check AcroForms for all matching signature/placeholder fields
+        val acroFormMatches = detectAllAcroFormFields(document)
+        results.addAll(acroFormMatches)
+
+        // 2. Check Text Search for all occurrences of the specified placeholder
         val locator = PdfTextLocator(placeholderTarget)
-        val textMatch = locator.findTarget(document)
-        if (textMatch != null) {
-            return textMatch
-        }
+        val textMatches = locator.findAllTargets(document)
+        results.addAll(textMatches)
 
-        // Also try clean target without ${} if not yet found
-        val cleanTarget = placeholderTarget.removePrefix("\${").removeSuffix("}")
-        if (cleanTarget != placeholderTarget) {
-            val cleanLocator = PdfTextLocator(cleanTarget)
-            val cleanMatch = cleanLocator.findTarget(document)
-            if (cleanMatch != null) {
-                return cleanMatch
+        // 3. Also check for standard numbered placeholders if user specified "${ttd_pengirim1}"
+        // or general ttd placeholder format: ${ttd_pengirim\d+} or ${ttd_\w+}
+        if (placeholderTarget.contains("ttd_pengirim", ignoreCase = true)) {
+            val generalLocator = PdfTextLocator("regex:\\\$\\{ttd_pengirim\\d+\\}")
+            val generalMatches = generalLocator.findAllTargets(document)
+            for (m in generalMatches) {
+                if (!results.any { it.pageIndex == m.pageIndex && Math.abs(it.x - m.x) < 20 && Math.abs(it.y - m.y) < 20 }) {
+                    results.add(m)
+                }
             }
         }
 
-        // 3. Fallback: place on the last page at bottom-right corner
-        return createFallbackMatch(document)
+        // 4. Try clean target without ${} if still empty
+        if (results.isEmpty()) {
+            val cleanTarget = placeholderTarget.removePrefix("\${").removeSuffix("}")
+            if (cleanTarget != placeholderTarget) {
+                val cleanLocator = PdfTextLocator(cleanTarget)
+                val cleanMatches = cleanLocator.findAllTargets(document)
+                results.addAll(cleanMatches)
+            }
+        }
+
+        // 5. If no placeholders found at all, activate fallback
+        if (results.isEmpty()) {
+            results.add(createFallbackMatch(document))
+        }
+
+        return results
     }
 
-    private fun detectAcroFormField(document: PDDocument): PlaceholderMatch? {
-        val acroForm = document.documentCatalog?.acroForm ?: return null
+    /**
+     * Backward-compatible single match method.
+     */
+    fun detectPlaceholder(document: PDDocument): PlaceholderMatch {
+        return detectAllPlaceholders(document).first()
+    }
+
+    private fun detectAllAcroFormFields(document: PDDocument): List<PlaceholderMatch> {
+        val matches = mutableListOf<PlaceholderMatch>()
+        val acroForm = document.documentCatalog?.acroForm ?: return emptyList()
         val cleanTarget = placeholderTarget.removePrefix("\${").removeSuffix("}")
 
-        val fields: List<PDField> = acroForm.fields ?: return null
+        val fields: List<PDField> = acroForm.fields ?: return emptyList()
         for (field in fields) {
             val name = field.fullyQualifiedName ?: field.partialName ?: ""
-            val matches = name.equals(placeholderTarget, ignoreCase = true) ||
+            val isTarget = name.equals(placeholderTarget, ignoreCase = true) ||
                     name.equals(cleanTarget, ignoreCase = true) ||
-                    name.contains("ttd_pengirim1", ignoreCase = true)
+                    name.contains("ttd_pengirim", ignoreCase = true) ||
+                    name.contains("signature", ignoreCase = true) ||
+                    name.contains("paraf", ignoreCase = true)
 
-            if (matches) {
+            if (isTarget) {
                 val widgets: List<PDAnnotationWidget> = field.widgets ?: emptyList()
                 for (widget in widgets) {
                     val rect = widget.rectangle
@@ -68,21 +91,23 @@ class PdfPlaceholderDetector(
                             findPageIndexWithAnnotation(document, widget)
                         }
 
-                        return PlaceholderMatch(
-                            pageIndex = pageIndex,
-                            x = rect.lowerLeftX,
-                            y = rect.lowerLeftY,
-                            width = rect.width.coerceAtLeast(80f),
-                            height = rect.height.coerceAtLeast(80f),
-                            source = DetectionMethod.ACROFORM,
-                            fieldName = name,
-                            details = "Ditemukan pada AcroForm field '$name' di halaman ${pageIndex + 1}"
+                        matches.add(
+                            PlaceholderMatch(
+                                pageIndex = pageIndex,
+                                x = rect.lowerLeftX,
+                                y = rect.lowerLeftY,
+                                width = rect.width.coerceAtLeast(80f),
+                                height = rect.height.coerceAtLeast(80f),
+                                source = DetectionMethod.ACROFORM,
+                                fieldName = name,
+                                details = "AcroForm Field '$name' pada halaman ${pageIndex + 1}"
+                            )
                         )
                     }
                 }
             }
         }
-        return null
+        return matches
     }
 
     private fun findPageIndexWithAnnotation(document: PDDocument, widget: PDAnnotationWidget): Int {

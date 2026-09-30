@@ -1,6 +1,8 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
@@ -8,6 +10,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
 import com.example.data.local.SignedDocumentEntity
 import com.example.data.repository.SignedDocumentRepository
+import com.example.model.BatchFileItem
+import com.example.model.BatchItemStatus
+import com.example.model.BatchProgressState
+import com.example.model.CustomQrPlacement
+import com.example.model.QrCenterOverlayType
+import com.example.model.QrOverlayConfig
 import com.example.pdf.PdfPreviewRenderer
 import com.example.pdf.PdfSampleGenerator
 import com.example.pdf.PdfSignerService
@@ -19,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 sealed interface SignUiState {
     data object Idle : SignUiState
@@ -35,6 +44,9 @@ data class SelectedDocumentSource(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val prefs: SharedPreferences =
+        application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val repository: SignedDocumentRepository
     private val signerService: PdfSignerService
@@ -61,11 +73,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _documentTitle = MutableStateFlow("Surat Keputusan Kerjasama")
     val documentTitle: StateFlow<String> = _documentTitle.asStateFlow()
 
-    private val _signerName = MutableStateFlow("Dr. Hendra Wijaya, M.T.")
+    // Default to empty string on first launch; otherwise load previously saved signer name!
+    private val _signerName = MutableStateFlow(
+        prefs.getString(KEY_SIGNER_NAME, "") ?: ""
+    )
     val signerName: StateFlow<String> = _signerName.asStateFlow()
 
     private val _targetPlaceholder = MutableStateFlow("\${ttd_pengirim1}")
     val targetPlaceholder: StateFlow<String> = _targetPlaceholder.asStateFlow()
+
+    // --- App Theme & Appearance Preferences ---
+    private val _themeMode = MutableStateFlow(
+        try {
+            val savedMode = prefs.getString(KEY_THEME_MODE, null)
+            if (savedMode != null) com.example.model.AppThemeMode.valueOf(savedMode) else com.example.model.AppThemeMode.LIGHT
+        } catch (_: Exception) {
+            com.example.model.AppThemeMode.LIGHT
+        }
+    )
+    val themeMode: StateFlow<com.example.model.AppThemeMode> = _themeMode.asStateFlow()
+
+    private val _paletteStyle = MutableStateFlow(
+        try {
+            val savedStyle = prefs.getString(KEY_PALETTE_STYLE, null)
+            if (savedStyle != null) com.example.model.ColorPaletteStyle.valueOf(savedStyle) else com.example.model.ColorPaletteStyle.OCEAN_BLUE
+        } catch (_: Exception) {
+            com.example.model.ColorPaletteStyle.OCEAN_BLUE
+        }
+    )
+    val paletteStyle: StateFlow<com.example.model.ColorPaletteStyle> = _paletteStyle.asStateFlow()
+
+    fun updateThemeMode(mode: com.example.model.AppThemeMode) {
+        _themeMode.value = mode
+        prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
+    }
+
+    fun updatePaletteStyle(style: com.example.model.ColorPaletteStyle) {
+        _paletteStyle.value = style
+        prefs.edit().putString(KEY_PALETTE_STYLE, style.name).apply()
+    }
+
+    // --- QR Center Logo / Initials Embedding Config ---
+    private val _qrOverlayConfig = MutableStateFlow(
+        QrOverlayConfig(
+            type = QrCenterOverlayType.NONE,
+            initials = computeInitials(_signerName.value)
+        )
+    )
+    val qrOverlayConfig: StateFlow<QrOverlayConfig> = _qrOverlayConfig.asStateFlow()
+
+    fun updateOverlayType(type: QrCenterOverlayType) {
+        _qrOverlayConfig.value = _qrOverlayConfig.value.copy(type = type)
+    }
+
+    fun updateOverlayInitials(initials: String) {
+        _qrOverlayConfig.value = _qrOverlayConfig.value.copy(initials = initials)
+    }
+
+    fun updateOverlayLogo(uri: Uri?, bitmap: Bitmap?) {
+        _qrOverlayConfig.value = _qrOverlayConfig.value.copy(
+            type = if (bitmap != null) QrCenterOverlayType.CUSTOM_LOGO else QrCenterOverlayType.INITIALS,
+            logoUri = uri,
+            logoBitmap = bitmap
+        )
+    }
 
     private val _detailItem = MutableStateFlow<SignedDocumentEntity?>(null)
     val detailItem: StateFlow<SignedDocumentEntity?> = _detailItem.asStateFlow()
@@ -83,12 +154,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _previewTotalPages = MutableStateFlow(0)
     val previewTotalPages: StateFlow<Int> = _previewTotalPages.asStateFlow()
 
+    // Touch-and-drag custom placement state: Map of pageIndex to CustomQrPlacement
+    private val _customPlacements = MutableStateFlow<Map<Int, CustomQrPlacement>>(emptyMap())
+    val customPlacements: StateFlow<Map<Int, CustomQrPlacement>> = _customPlacements.asStateFlow()
+
+    private val _isManualPlacementMode = MutableStateFlow(false)
+    val isManualPlacementMode: StateFlow<Boolean> = _isManualPlacementMode.asStateFlow()
+
+    fun toggleManualPlacementMode(enable: Boolean? = null) {
+        val next = enable ?: !_isManualPlacementMode.value
+        _isManualPlacementMode.value = next
+        // If enabling and no placement exists for current page, set a sensible default center-bottom
+        if (next && !_customPlacements.value.containsKey(_previewCurrentPage.value)) {
+            setQrPlacement(_previewCurrentPage.value, 0.65f, 0.75f)
+        }
+    }
+
+    fun setQrPlacement(pageIndex: Int, normX: Float, normY: Float) {
+        val current = _customPlacements.value.toMutableMap()
+        current[pageIndex] = CustomQrPlacement(
+            pageIndex = pageIndex,
+            normalizedX = normX.coerceIn(0.02f, 0.85f),
+            normalizedY = normY.coerceIn(0.02f, 0.85f)
+        )
+        _customPlacements.value = current
+    }
+
+    fun clearCustomPlacement(pageIndex: Int? = null) {
+        if (pageIndex != null) {
+            val current = _customPlacements.value.toMutableMap()
+            current.remove(pageIndex)
+            _customPlacements.value = current
+        } else {
+            _customPlacements.value = emptyMap()
+            _isManualPlacementMode.value = false
+        }
+    }
+
     fun updateDocumentTitle(title: String) {
         _documentTitle.value = title
     }
 
     fun updateSignerName(signer: String) {
         _signerName.value = signer
+        prefs.edit().putString(KEY_SIGNER_NAME, signer).apply()
+        val newInitials = computeInitials(signer)
+        if (_qrOverlayConfig.value.type == QrCenterOverlayType.INITIALS && newInitials.isNotBlank()) {
+            _qrOverlayConfig.value = _qrOverlayConfig.value.copy(initials = newInitials)
+        }
     }
 
     fun updateTargetPlaceholder(placeholder: String) {
@@ -117,6 +230,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     PdfSampleGenerator.SampleType.TEXT_PLACEHOLDER -> "Dokumen Sampel (Placeholder Teks \${ttd_pengirim1})"
                     PdfSampleGenerator.SampleType.ACROFORM_FIELD -> "Dokumen Sampel (AcroForm Field 'ttd_pengirim1')"
                     PdfSampleGenerator.SampleType.NO_PLACEHOLDER_FALLBACK -> "Dokumen Sampel (Tanpa Placeholder - Test Fallback)"
+                    PdfSampleGenerator.SampleType.MULTI_PLACEHOLDER -> "Dokumen Kontrak Multi-Pihak (2 Placeholder TTD)"
                 }
                 _selectedDocument.value = SelectedDocumentSource(
                     title = file.name,
@@ -172,15 +286,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        if (_signerName.value.trim().isEmpty()) {
+            _uiState.value = SignUiState.Error("Silakan isi nama penandatangan terlebih dahulu.")
+            return
+        }
+
+        // Persist signer name
+        prefs.edit().putString(KEY_SIGNER_NAME, _signerName.value.trim()).apply()
+
         viewModelScope.launch {
             _uiState.value = SignUiState.Loading("Menganalisis placeholder & menandatangani...")
             try {
+                // If user customized QR placement via touch-and-drag, pass it to signerService
+                val placement = if (_isManualPlacementMode.value) {
+                    _customPlacements.value[_previewCurrentPage.value]
+                } else {
+                    null
+                }
+
                 val result = signerService.signPdf(
                     documentTitle = _documentTitle.value,
                     signerName = _signerName.value,
                     inputSource = currentDoc.source,
                     originalFileName = currentDoc.title,
-                    customPlaceholder = _targetPlaceholder.value
+                    customPlaceholder = _targetPlaceholder.value,
+                    qrOverlayConfig = _qrOverlayConfig.value,
+                    customPlacement = placement
                 )
                 _uiState.value = SignUiState.Success(result)
             } catch (e: Exception) {
@@ -205,5 +336,233 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetState() {
         _uiState.value = SignUiState.Idle
+    }
+
+    // --- Backup & Restore Operations ---
+    private val _backupStatusMessage = MutableStateFlow<String?>(null)
+    val backupStatusMessage: StateFlow<String?> = _backupStatusMessage.asStateFlow()
+
+    private val _isBackupProcessing = MutableStateFlow(false)
+    val isBackupProcessing: StateFlow<Boolean> = _isBackupProcessing.asStateFlow()
+
+    private val _lastBackupResult = MutableStateFlow<com.example.data.backup.BackupResult?>(null)
+    val lastBackupResult: StateFlow<com.example.data.backup.BackupResult?> = _lastBackupResult.asStateFlow()
+
+    fun performBackup() {
+        viewModelScope.launch {
+            _isBackupProcessing.value = true
+            _backupStatusMessage.value = null
+            try {
+                val result = com.example.data.backup.BackupRestoreManager.createBackup(
+                    context = getApplication(),
+                    repository = repository
+                )
+                _lastBackupResult.value = result
+                _backupStatusMessage.value = "Backup berhasil dibuat (${result.fileSizeFormatted}, ${result.totalDocuments} dokumen, ${result.totalPdfFiles} file PDF)."
+            } catch (e: Exception) {
+                _backupStatusMessage.value = "Gagal membuat backup: ${e.localizedMessage ?: "Terjadi kesalahan"}"
+            } finally {
+                _isBackupProcessing.value = false
+            }
+        }
+    }
+
+    fun performRestore(zipUri: Uri, replaceExisting: Boolean) {
+        viewModelScope.launch {
+            _isBackupProcessing.value = true
+            _backupStatusMessage.value = null
+            try {
+                val result = com.example.data.backup.BackupRestoreManager.restoreBackup(
+                    context = getApplication(),
+                    zipUri = zipUri,
+                    repository = repository,
+                    replaceExisting = replaceExisting
+                )
+                _backupStatusMessage.value = result.message
+            } catch (e: Exception) {
+                _backupStatusMessage.value = "Gagal memulihkan backup: ${e.localizedMessage ?: "File ZIP tidak valid"}"
+            } finally {
+                _isBackupProcessing.value = false
+            }
+        }
+    }
+
+    fun clearAllData() {
+        viewModelScope.launch {
+            repository.clearAll()
+            _backupStatusMessage.value = "Semua riwayat data Room berhasil dikosongkan."
+        }
+    }
+
+    fun clearBackupStatus() {
+        _backupStatusMessage.value = null
+    }
+
+    // --- Batch Auto-Signing Progress & State ---
+    private val _batchState = MutableStateFlow(BatchProgressState())
+    val batchState: StateFlow<BatchProgressState> = _batchState.asStateFlow()
+
+    fun addBatchFiles(uris: List<Pair<Uri, String>>) {
+        val currentItems = _batchState.value.items.toMutableList()
+        val newItems = uris.map { (uri, name) ->
+            BatchFileItem(
+                id = UUID.randomUUID().toString(),
+                fileName = name,
+                source = uri,
+                status = BatchItemStatus.PENDING,
+                details = "Siap untuk diproses"
+            )
+        }
+        currentItems.addAll(newItems)
+        _batchState.value = BatchProgressState(
+            items = currentItems,
+            totalCount = currentItems.size,
+            currentIndex = 0,
+            isCompleted = false
+        )
+    }
+
+    fun loadSampleBatchSuite() {
+        viewModelScope.launch {
+            _batchState.value = _batchState.value.copy(isRunning = true)
+            try {
+                val f1 = PdfSampleGenerator.generateSample(getApplication(), PdfSampleGenerator.SampleType.MULTI_PLACEHOLDER)
+                val f2 = PdfSampleGenerator.generateSample(getApplication(), PdfSampleGenerator.SampleType.TEXT_PLACEHOLDER)
+                val f3 = PdfSampleGenerator.generateSample(getApplication(), PdfSampleGenerator.SampleType.ACROFORM_FIELD)
+                val f4 = PdfSampleGenerator.generateSample(getApplication(), PdfSampleGenerator.SampleType.NO_PLACEHOLDER_FALLBACK)
+
+                val sampleItems = listOf(
+                    BatchFileItem(UUID.randomUUID().toString(), "Kontrak_Multi_2_Pihak.pdf", f1, details = "2 Placeholder (${'$'}{ttd_pengirim1} & ${'$'}{ttd_pengirim2})"),
+                    BatchFileItem(UUID.randomUUID().toString(), "Surat_Keputusan_Teks.pdf", f2, details = "1 Placeholder teks (${'$'}{ttd_pengirim1})"),
+                    BatchFileItem(UUID.randomUUID().toString(), "Formulir_AcroForm.pdf", f3, details = "AcroForm Field 'ttd_pengirim1'"),
+                    BatchFileItem(UUID.randomUUID().toString(), "Dokumen_Umum_Fallback.pdf", f4, details = "Tanpa placeholder (Fallback test)")
+                )
+
+                _batchState.value = BatchProgressState(
+                    isRunning = false,
+                    items = sampleItems,
+                    totalCount = sampleItems.size,
+                    currentIndex = 0,
+                    isCompleted = false
+                )
+            } catch (e: Exception) {
+                _batchState.value = _batchState.value.copy(isRunning = false)
+            }
+        }
+    }
+
+    fun startBatchSigning() {
+        val currentState = _batchState.value
+        val itemsToProcess = currentState.items
+        if (itemsToProcess.isEmpty() || currentState.isRunning) return
+
+        viewModelScope.launch {
+            val total = itemsToProcess.size
+            var success = 0
+            var failure = 0
+            var totalSigs = 0
+
+            _batchState.value = currentState.copy(
+                isRunning = true,
+                currentIndex = 0,
+                totalCount = total,
+                successCount = 0,
+                failureCount = 0,
+                totalSignaturesPlaced = 0,
+                isCompleted = false
+            )
+
+            val updatedItems = itemsToProcess.toMutableList()
+
+            for (index in itemsToProcess.indices) {
+                val item = updatedItems[index]
+                _batchState.value = _batchState.value.copy(
+                    currentIndex = index,
+                    currentFileName = item.fileName
+                )
+
+                // Set current item to processing
+                updatedItems[index] = item.copy(
+                    status = BatchItemStatus.PROCESSING,
+                    details = "Mencari placeholder & menempelkan tanda tangan..."
+                )
+                _batchState.value = _batchState.value.copy(items = updatedItems.toList())
+
+                val startTime = System.currentTimeMillis()
+                try {
+                    val result = signerService.signPdf(
+                        documentTitle = item.fileName.removeSuffix(".pdf"),
+                        signerName = _signerName.value.ifBlank { "Penandatangan Resmi" },
+                        inputSource = item.source,
+                        originalFileName = item.fileName,
+                        customPlaceholder = _targetPlaceholder.value,
+                        qrOverlayConfig = _qrOverlayConfig.value
+                    )
+                    val duration = System.currentTimeMillis() - startTime
+                    val sigCount = result.signaturesCount
+                    totalSigs += sigCount
+                    success++
+
+                    val statusDetail = if (sigCount > 1) {
+                        "Berhasil! $sigCount placeholder terdeteksi & ditandatangani otomatis (${duration}ms)"
+                    } else {
+                        "Berhasil! 1 placeholder ditandatangani (${result.match.source.name}, ${duration}ms)"
+                    }
+
+                    updatedItems[index] = item.copy(
+                        status = BatchItemStatus.SUCCESS,
+                        signaturesCount = sigCount,
+                        details = statusDetail,
+                        durationMs = duration,
+                        signedFilePath = result.signedFile.absolutePath
+                    )
+                } catch (e: Exception) {
+                    val duration = System.currentTimeMillis() - startTime
+                    failure++
+                    updatedItems[index] = item.copy(
+                        status = BatchItemStatus.FAILED,
+                        details = "Gagal: ${e.localizedMessage ?: "Kesalahan pemrosesan berkas"}",
+                        durationMs = duration,
+                        errorMessage = e.localizedMessage
+                    )
+                }
+
+                _batchState.value = _batchState.value.copy(
+                    currentIndex = index + 1,
+                    successCount = success,
+                    failureCount = failure,
+                    totalSignaturesPlaced = totalSigs,
+                    items = updatedItems.toList()
+                )
+            }
+
+            _batchState.value = _batchState.value.copy(
+                isRunning = false,
+                isCompleted = true,
+                currentFileName = null
+            )
+        }
+    }
+
+    fun clearBatchQueue() {
+        if (!_batchState.value.isRunning) {
+            _batchState.value = BatchProgressState()
+        }
+    }
+
+    companion object {
+        private const val PREFS_NAME = "pdf_signer_preferences"
+        private const val KEY_SIGNER_NAME = "saved_signer_name"
+        private const val KEY_THEME_MODE = "saved_theme_mode"
+        private const val KEY_PALETTE_STYLE = "saved_palette_style"
+
+        fun computeInitials(name: String): String {
+            val parts = name.trim().split("\\s+".toRegex()).filter { it.isNotEmpty() }
+            return when {
+                parts.isEmpty() -> ""
+                parts.size == 1 -> parts[0].take(2).uppercase()
+                else -> "${parts[0].first().uppercaseChar()}${parts[1].first().uppercaseChar()}"
+            }
+        }
     }
 }

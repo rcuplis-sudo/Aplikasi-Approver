@@ -132,6 +132,13 @@ fun HistoryScreen(
                     HistoryItemCard(
                         document = doc,
                         onOpen = { PdfFileHelper.openPdf(context, doc.signedFilePath) },
+                        onDownload = {
+                            PdfFileHelper.downloadPdfToDevice(
+                                context,
+                                doc.signedFilePath,
+                                "${doc.documentTitle}.pdf"
+                            )
+                        },
                         onShare = { PdfFileHelper.sharePdf(context, doc.signedFilePath, doc.documentTitle) },
                         onViewDetail = { viewModel.showDetail(doc) },
                         onDelete = { viewModel.deleteHistory(doc.id) }
@@ -146,6 +153,7 @@ fun HistoryScreen(
 fun HistoryItemCard(
     document: SignedDocumentEntity,
     onOpen: () -> Unit,
+    onDownload: () -> Unit,
     onShare: () -> Unit,
     onViewDetail: () -> Unit,
     onDelete: () -> Unit
@@ -250,8 +258,11 @@ fun HistoryItemCard(
                 IconButton(onClick = onOpen, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.OpenInNew, contentDescription = "Buka PDF", tint = MaterialTheme.colorScheme.primary)
                 }
+                IconButton(onClick = onDownload, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Download, contentDescription = "Unduh PDF", tint = MaterialTheme.colorScheme.primary)
+                }
                 IconButton(onClick = onShare, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Share, contentDescription = "Bagikan", tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.Share, contentDescription = "Bagikan ke WhatsApp/Lainnya", tint = MaterialTheme.colorScheme.primary)
                 }
                 IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = "Hapus", tint = MaterialTheme.colorScheme.error)

@@ -76,6 +76,48 @@ class PlaceholderSearchUnitTest {
     }
 
     @Test
+    fun testTextPositionSearch_multiplePlaceholdersDetected() {
+        val pageHeight = 842f
+        val pageIndex = 0
+        val positions = mutableListOf<CharPosition>()
+
+        // Placeholder 1: ${ttd_pengirim1} at Y=300, X=50
+        val p1 = "\${ttd_pengirim1}"
+        var x1 = 50f
+        for (ch in p1) {
+            positions.add(CharPosition(ch.toString(), x1, 300f, 9f, 12f, pageIndex, pageHeight))
+            x1 += 9f
+        }
+
+        // Intermediary text
+        val gap = " --- "
+        for (ch in gap) {
+            positions.add(CharPosition(ch.toString(), x1, 300f, 6f, 12f, pageIndex, pageHeight))
+            x1 += 6f
+        }
+
+        // Placeholder 2: ${ttd_pengirim2} at Y=300, X=x1
+        val p2 = "\${ttd_pengirim2}"
+        val expectedStartX2 = x1
+        for (ch in p2) {
+            positions.add(CharPosition(ch.toString(), x1, 300f, 9f, 12f, pageIndex, pageHeight))
+            x1 += 9f
+        }
+
+        // Search with regex matching both: \${ttd_pengirim\d+}
+        val matches = TextPositionMatcher.searchAllInPositions(
+            positions = positions,
+            targetTextOrRegex = "regex:\\\$\\{ttd_pengirim\\d+\\}",
+            pageIndex = pageIndex,
+            pageHeight = pageHeight
+        )
+
+        assertEquals("Harus menemukan 2 placeholder secara otomatis", 2, matches.size)
+        assertEquals(50f, matches[0].x, 0.01f)
+        assertEquals(expectedStartX2, matches[1].x, 0.01f)
+    }
+
+    @Test
     fun testTextPositionSearch_placeholderNotFound() {
         val pageHeight = 842f
         val positions = listOf(
@@ -143,5 +185,65 @@ class PlaceholderSearchUnitTest {
 
         assertNotNull(hash)
         assertEquals(64, hash.length) // SHA-256 is 64 hex characters
+    }
+
+    @Test
+    fun testBackupFileNameFormat() {
+        val timeStampRegex = "^PDF_Signer_Backup_\\d{8}_\\d{6}\\.zip$".toRegex()
+        val sampleName = "PDF_Signer_Backup_20260928_060000.zip"
+        assertTrue("Nama file backup harus sesuai format ZIP bertanggal", sampleName.matches(timeStampRegex))
+    }
+
+    @Test
+    fun testBatchProgressStateFractionCalculation() {
+        val emptyState = com.example.model.BatchProgressState(totalCount = 0, currentIndex = 0)
+        assertEquals(0f, emptyState.progressFraction, 0.001f)
+
+        val halfState = com.example.model.BatchProgressState(totalCount = 4, currentIndex = 2)
+        assertEquals(0.5f, halfState.progressFraction, 0.001f)
+
+        val fullState = com.example.model.BatchProgressState(totalCount = 10, currentIndex = 10)
+        assertEquals(1.0f, fullState.progressFraction, 0.001f)
+    }
+
+    @Test
+    fun testQrOverlayConfigDefaults() {
+        val config = com.example.model.QrOverlayConfig()
+        assertEquals(com.example.model.QrCenterOverlayType.INITIALS, config.type)
+        assertEquals("HW", config.initials)
+        assertNull(config.logoBitmap)
+        assertNull(config.logoUri)
+    }
+
+    @Test
+    fun testCustomQrPlacementCreation() {
+        val placement = com.example.model.CustomQrPlacement(
+            pageIndex = 0,
+            normalizedX = 0.7f,
+            normalizedY = 0.8f
+        )
+        assertEquals(0, placement.pageIndex)
+        assertEquals(0.7f, placement.normalizedX, 0.001f)
+        assertEquals(0.8f, placement.normalizedY, 0.001f)
+        assertEquals(com.example.model.DetectionMethod.MANUAL_DRAG.name, "MANUAL_DRAG")
+    }
+
+    @Test
+    fun testAppThemePreferences() {
+        val defaultMode = com.example.model.AppThemeMode.LIGHT
+        val defaultPalette = com.example.model.ColorPaletteStyle.OCEAN_BLUE
+        assertEquals("LIGHT", defaultMode.name)
+        assertEquals("OCEAN_BLUE", defaultPalette.name)
+        assertEquals(4, com.example.model.ColorPaletteStyle.entries.size)
+    }
+
+    @Test
+    fun testComputeInitialsAndSignerName() {
+        assertEquals("BS", com.example.ui.MainViewModel.computeInitials("Budi Santoso"))
+        assertEquals("HW", com.example.ui.MainViewModel.computeInitials("Hendra Wijaya"))
+        assertEquals("JD", com.example.ui.MainViewModel.computeInitials("John Doe"))
+        assertEquals("JO", com.example.ui.MainViewModel.computeInitials("John"))
+        assertEquals("", com.example.ui.MainViewModel.computeInitials(""))
+        assertEquals("", com.example.ui.MainViewModel.computeInitials("   "))
     }
 }

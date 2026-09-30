@@ -31,12 +31,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.DetectionMethod
 import com.example.pdf.PdfSampleGenerator
 import com.example.ui.MainViewModel
 import com.example.ui.PdfFileHelper
 import com.example.ui.SignUiState
 import com.example.ui.components.PdfPagePreviewCard
+import com.example.ui.components.QrCenterOverlaySettingsCard
 import com.example.ui.theme.AmberFallback
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.NavyLight
@@ -54,11 +56,14 @@ fun SignPdfScreen(
     val docTitle by viewModel.documentTitle.collectAsState()
     val signerName by viewModel.signerName.collectAsState()
     val targetPlaceholder by viewModel.targetPlaceholder.collectAsState()
+    val qrOverlayConfig by viewModel.qrOverlayConfig.collectAsState()
 
     val previewBitmap by viewModel.previewBitmap.collectAsState()
     val isPreviewLoading by viewModel.isPreviewLoading.collectAsState()
     val previewCurrentPage by viewModel.previewCurrentPage.collectAsState()
     val previewTotalPages by viewModel.previewTotalPages.collectAsState()
+    val customPlacements by viewModel.customPlacements.collectAsState()
+    val isManualPlacementMode by viewModel.isManualPlacementMode.collectAsState()
 
     // File picker launcher
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -133,7 +138,7 @@ fun SignPdfScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     OutlinedButton(
                         onClick = { viewModel.loadSample(PdfSampleGenerator.SampleType.TEXT_PLACEHOLDER) },
@@ -141,9 +146,20 @@ fun SignPdfScreen(
                             .weight(1f)
                             .testTag("sample_text_button"),
                         shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                     ) {
-                        Text("Teks \${ttd}", style = MaterialTheme.typography.labelSmall)
+                        Text("1 Teks", style = MaterialTheme.typography.labelSmall)
+                    }
+
+                    OutlinedButton(
+                        onClick = { viewModel.loadSample(PdfSampleGenerator.SampleType.MULTI_PLACEHOLDER) },
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .testTag("sample_multi_button"),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                    ) {
+                        Text("2+ Multi TTD", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
@@ -152,7 +168,7 @@ fun SignPdfScreen(
                             .weight(1f)
                             .testTag("sample_acroform_button"),
                         shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                     ) {
                         Text("AcroForm", style = MaterialTheme.typography.labelSmall)
                     }
@@ -163,7 +179,7 @@ fun SignPdfScreen(
                             .weight(1f)
                             .testTag("sample_fallback_button"),
                         shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                     ) {
                         Text("Fallback", style = MaterialTheme.typography.labelSmall)
                     }
@@ -205,7 +221,7 @@ fun SignPdfScreen(
             }
         }
 
-        // Section 2: PDF Page Preview using PDFBox PDFRenderer
+        // Section 2: PDF Page Preview with Touch-and-Drag QR Placement
         if (selectedDoc != null) {
             PdfPagePreviewCard(
                 previewBitmap = previewBitmap,
@@ -213,76 +229,142 @@ fun SignPdfScreen(
                 currentPage = previewCurrentPage,
                 totalPages = previewTotalPages,
                 targetPlaceholder = targetPlaceholder,
+                signerName = signerName,
+                qrOverlayConfig = qrOverlayConfig,
+                isManualPlacementMode = isManualPlacementMode,
+                customPlacement = customPlacements[previewCurrentPage],
+                onToggleManualMode = { viewModel.toggleManualPlacementMode() },
+                onPositionChanged = { normX, normY ->
+                    viewModel.setQrPlacement(previewCurrentPage, normX, normY)
+                },
+                onResetPosition = { viewModel.clearCustomPlacement(previewCurrentPage) },
                 onPreviousPage = { viewModel.changePreviewPage(previewCurrentPage - 1) },
                 onNextPage = { viewModel.changePreviewPage(previewCurrentPage + 1) }
             )
         }
 
-        // Section 3: Metadata & Signature Configuration
+        // Section 3: Ringkasan Parameter & Tanda Tangan
+        var isParamExpanded by remember(signerName.isBlank()) { mutableStateOf(signerName.isBlank()) }
+
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("metadata_config_card"),
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+            border = CardDefaults.outlinedCardBorder()
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "3. Parameter Dokumen & Penandatangan",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = if (signerName.isNotBlank()) "Penandatangan: $signerName" else "Penandatangan: (Belum diisi)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (signerName.isNotBlank()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = if (signerName.isNotBlank()) "Target: $targetPlaceholder (Tersimpan)" else "Isi nama penandatangan di bawah",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    TextButton(
+                        onClick = { isParamExpanded = !isParamExpanded },
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Text(if (isParamExpanded) "Tutup" else "Ubah")
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Icon(
+                            if (isParamExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
 
-                OutlinedTextField(
-                    value = docTitle,
-                    onValueChange = { viewModel.updateDocumentTitle(it) },
-                    label = { Text("Nama / Judul Dokumen (doc)") },
-                    leadingIcon = { Icon(Icons.Default.Title, contentDescription = null) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("doc_title_input"),
-                    shape = RoundedCornerShape(10.dp),
-                    singleLine = true
-                )
+                // Expandable Fields
+                AnimatedVisibility(visible = isParamExpanded) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(top = 6.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = docTitle,
+                            onValueChange = { viewModel.updateDocumentTitle(it) },
+                            label = { Text("Nama / Judul Dokumen (doc)") },
+                            leadingIcon = { Icon(Icons.Default.Title, contentDescription = null) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("doc_title_input"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
 
-                OutlinedTextField(
-                    value = signerName,
-                    onValueChange = { viewModel.updateSignerName(it) },
-                    label = { Text("Nama Penandatangan (signer)") },
-                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("signer_name_input"),
-                    shape = RoundedCornerShape(10.dp),
-                    singleLine = true
-                )
+                        OutlinedTextField(
+                            value = signerName,
+                            onValueChange = { viewModel.updateSignerName(it) },
+                            label = { Text("Nama Penandatangan (Signer)") },
+                            placeholder = { Text("Ketik nama penandatangan...") },
+                            supportingText = {
+                                Text(
+                                    if (signerName.isBlank()) "Nama wajib diisi dan akan tersimpan otomatis untuk selanjutnya"
+                                    else "Tersimpan otomatis untuk penandatanganan berikutnya",
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            },
+                            leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("signer_name_input"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
 
-                OutlinedTextField(
-                    value = targetPlaceholder,
-                    onValueChange = { viewModel.updateTargetPlaceholder(it) },
-                    label = { Text("Placeholder Target (Text / AcroForm)") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("placeholder_target_input"),
-                    shape = RoundedCornerShape(10.dp),
-                    singleLine = true,
-                    supportingText = {
-                        Text("Default: \${ttd_pengirim1} (AcroForm atau teks)")
+                        OutlinedTextField(
+                            value = targetPlaceholder,
+                            onValueChange = { viewModel.updateTargetPlaceholder(it) },
+                            label = { Text("Placeholder Target (Text / AcroForm)") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("placeholder_target_input"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true,
+                            supportingText = {
+                                Text("Default: \${ttd_pengirim1} (AcroForm atau teks)")
+                            }
+                        )
                     }
-                )
+                }
             }
         }
 
@@ -365,10 +447,20 @@ fun SignPdfScreen(
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         // Detection Status Banner
-                        val (bannerBg, bannerColor, badgeTitle) = when (match.source) {
-                            DetectionMethod.ACROFORM -> Triple(EmeraldSuccess.copy(alpha = 0.15f), EmeraldSuccess, "AcroForm Field Berhasil Ditemukan")
-                            DetectionMethod.TEXT_SEARCH -> Triple(NavyLight.copy(alpha = 0.15f), NavyLight, "Placeholder Teks Berhasil Ditemukan")
-                            DetectionMethod.FALLBACK -> Triple(AmberFallback.copy(alpha = 0.15f), AmberFallback, "Mode Fallback Diaktifkan")
+                        val (bannerBg, bannerColor, badgeTitle) = when {
+                            successResult.signaturesCount > 1 -> Triple(
+                                EmeraldSuccess.copy(alpha = 0.18f),
+                                EmeraldSuccess,
+                                "Otomatis Menandatangani ${successResult.signaturesCount} Placeholder"
+                            )
+                            match.source == DetectionMethod.MANUAL_DRAG -> Triple(
+                                PrimaryBlueLight.copy(alpha = 0.15f),
+                                PrimaryBlueLight,
+                                "Posisi QR Ditempatkan via Touch-and-Drag"
+                            )
+                            match.source == DetectionMethod.ACROFORM -> Triple(EmeraldSuccess.copy(alpha = 0.15f), EmeraldSuccess, "AcroForm Field Berhasil Ditemukan")
+                            match.source == DetectionMethod.TEXT_SEARCH -> Triple(NavyLight.copy(alpha = 0.15f), NavyLight, "Placeholder Teks Berhasil Ditemukan")
+                            else -> Triple(AmberFallback.copy(alpha = 0.15f), AmberFallback, "Mode Fallback Diaktifkan")
                         }
 
                         Surface(
@@ -395,7 +487,11 @@ fun SignPdfScreen(
                                         color = bannerColor
                                     )
                                     Text(
-                                        text = match.details,
+                                        text = if (successResult.signaturesCount > 1) {
+                                            "Terdeteksi ${successResult.signaturesCount} lokasi placeholder di dokumen. Seluruh ${successResult.signaturesCount} posisi langsung ditempeli kode QR tanda tangan digital secara serentak."
+                                        } else {
+                                            match.details
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -494,23 +590,55 @@ fun SignPdfScreen(
                             )
                         }
 
-                        // Action Buttons: Open & Share Signed PDF
+                        // Action Buttons: Open, Download, & Share Signed PDF
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Button(
                                 onClick = {
                                     PdfFileHelper.openPdf(context, successResult.signedFile.absolutePath)
                                 },
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .weight(0.9f)
                                     .testTag("open_signed_pdf_button"),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Buka File PDF")
+                                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "Buka",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+
+                            FilledTonalButton(
+                                onClick = {
+                                    PdfFileHelper.downloadPdfToDevice(
+                                        context,
+                                        successResult.signedFile.absolutePath,
+                                        successResult.signedFile.name
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1.0f)
+                                    .testTag("download_signed_pdf_button"),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "Unduh",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
 
                             OutlinedButton(
@@ -522,13 +650,20 @@ fun SignPdfScreen(
                                     )
                                 },
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .weight(1.3f)
                                     .testTag("share_signed_pdf_button"),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Bagikan")
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "Bagikan / WA",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
                         }
                     }
