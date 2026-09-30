@@ -79,7 +79,9 @@ class PdfSignerService(
             val page = document.getPage(targetPageIdx)
             val box = page.cropBox ?: page.mediaBox
 
-            val qrSizePts = 85f
+            val baseDp = 75f
+            val basePts = 85f
+            val qrSizePts = ((customPlacement.qrSizeDp / baseDp) * basePts).coerceIn(40f, 160f)
             // In PDF coordinate space, (0,0) is bottom-left, while in visual/screen it's top-left
             val pdfX = (customPlacement.normalizedX * box.width).coerceIn(10f, box.width - qrSizePts - 10f)
             val pdfY = ((1f - customPlacement.normalizedY) * box.height - qrSizePts).coerceIn(15f, box.height - qrSizePts - 15f)
@@ -101,6 +103,10 @@ class PdfSignerService(
             detector.detectAllPlaceholders(document)
         }
 
+        if (allMatches.isEmpty()) {
+            throw IllegalArgumentException("Placeholder teks '$customPlaceholder' tidak ditemukan pada dokumen ini. Pastikan teks placeholder sesuai atau gunakan mode 'Atur Posisi (Geser QR)'.")
+        }
+
         val primaryMatch = allMatches.first()
 
         // 3. Prepare QR Payloads & Embed QR Code into EACH detected placeholder
@@ -115,8 +121,7 @@ class PdfSignerService(
                 val signIndex = index + 1
                 val sigId = if (allMatches.size > 1) "$baseSignatureId-$signIndex" else baseSignatureId
                 val effectiveSigner = if (allMatches.size > 1) {
-                    val signSuffix = match.fieldName ?: "Pihak $signIndex"
-                    "$signerName ($signSuffix)"
+                    "$signerName (TTD ke-$signIndex)"
                 } else {
                     signerName.ifBlank { "Penandatangan Resmi" }
                 }
@@ -231,10 +236,26 @@ class PdfSignerService(
                 Triple(x, y, size)
             }
             DetectionMethod.TEXT_SEARCH -> {
-                val size = 85f
-                val x = match.x
-                // Position QR just under or over the placeholder text line
-                val y = (match.y - size + 10f).coerceIn(20f, pageBox.height - size - 20f)
+                val availableSpace = match.availableVerticalSpace
+                val textBelowY = match.textBelowPdfY
+
+                // Auto-Fit Adaptive Sizing:
+                // Automatically adapt QR size so it fits the space and NEVER covers text below
+                val size = if (availableSpace != null && availableSpace > 0f) {
+                    (availableSpace - 8f).coerceIn(38f, 85f)
+                } else {
+                    80f
+                }
+
+                val x = match.x.coerceIn(15f, pageBox.width - size - 15f)
+
+                // Position: safely placed above the text underneath with safety clearance
+                val y = if (textBelowY != null) {
+                    (textBelowY + 4f).coerceAtLeast(20f)
+                } else {
+                    (match.y - size - 4f).coerceIn(20f, pageBox.height - size - 20f)
+                }
+
                 Triple(x, y, size)
             }
             DetectionMethod.FALLBACK -> {
@@ -242,7 +263,7 @@ class PdfSignerService(
                 Triple(match.x, match.y, size)
             }
             DetectionMethod.MANUAL_DRAG -> {
-                val size = match.width.coerceIn(60f, 120f)
+                val size = match.width.coerceIn(35f, 180f)
                 Triple(match.x, match.y, size)
             }
         }

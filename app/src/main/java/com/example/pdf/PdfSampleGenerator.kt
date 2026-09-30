@@ -171,7 +171,7 @@ object PdfSampleGenerator {
             stream.beginText()
             stream.setFont(PDType1Font.COURIER_BOLD, 12f)
             stream.newLineAtOffset(350f, 250f)
-            stream.showText("\${ttd_pengirim2}")
+            stream.showText("\${ttd_pengirim1}")
             stream.endText()
 
             stream.beginText()

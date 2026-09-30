@@ -305,7 +305,7 @@ fun BatchSigningScreen(
             ) {
                 Icon(Icons.Default.AutoMode, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Muat 4 Dokumen Uji", style = MaterialTheme.typography.labelMedium)
+                Text("Muat Dokumen Uji", style = MaterialTheme.typography.labelMedium)
             }
         }
 

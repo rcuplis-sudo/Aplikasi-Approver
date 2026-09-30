@@ -11,9 +11,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.BrandingWatermark
 import androidx.compose.material.icons.filled.AddPhotoAlternate
-import androidx.compose.material.icons.filled.BrandingWatermark
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.*
@@ -92,7 +93,7 @@ fun QrCenterOverlaySettingsCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        Icons.Default.BrandingWatermark,
+                        Icons.AutoMirrored.Filled.BrandingWatermark,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
@@ -247,6 +248,18 @@ fun QrCenterOverlaySettingsCard(
                                         .fillMaxSize()
                                         .padding(4.dp)
                                         .clip(CircleShape)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { onLogoSelected(null, null) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Hapus Logo",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }

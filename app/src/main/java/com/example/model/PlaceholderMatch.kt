@@ -15,5 +15,7 @@ data class PlaceholderMatch(
     val height: Float,
     val source: DetectionMethod,
     val fieldName: String? = null,
-    val details: String = ""
+    val details: String = "",
+    val availableVerticalSpace: Float? = null,
+    val textBelowPdfY: Float? = null
 )

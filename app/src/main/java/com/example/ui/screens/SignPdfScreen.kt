@@ -138,50 +138,30 @@ fun SignPdfScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
                         onClick = { viewModel.loadSample(PdfSampleGenerator.SampleType.TEXT_PLACEHOLDER) },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("sample_text_button"),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("1 Teks", style = MaterialTheme.typography.labelSmall)
+                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("1 Teks TTD", style = MaterialTheme.typography.labelSmall)
                     }
 
                     OutlinedButton(
                         onClick = { viewModel.loadSample(PdfSampleGenerator.SampleType.MULTI_PLACEHOLDER) },
                         modifier = Modifier
-                            .weight(1.2f)
+                            .weight(1f)
                             .testTag("sample_multi_button"),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("2+ Multi TTD", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                    }
-
-                    OutlinedButton(
-                        onClick = { viewModel.loadSample(PdfSampleGenerator.SampleType.ACROFORM_FIELD) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("sample_acroform_button"),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                    ) {
-                        Text("AcroForm", style = MaterialTheme.typography.labelSmall)
-                    }
-
-                    OutlinedButton(
-                        onClick = { viewModel.loadSample(PdfSampleGenerator.SampleType.NO_PLACEHOLDER_FALLBACK) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("sample_fallback_button"),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                    ) {
-                        Text("Fallback", style = MaterialTheme.typography.labelSmall)
+                        Icon(Icons.Default.FactCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("1 Teks 2+ Multi TTD", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -236,6 +216,9 @@ fun SignPdfScreen(
                 onToggleManualMode = { viewModel.toggleManualPlacementMode() },
                 onPositionChanged = { normX, normY ->
                     viewModel.setQrPlacement(previewCurrentPage, normX, normY)
+                },
+                onSizeChanged = { newSizeDp ->
+                    viewModel.updateQrPlacementSize(previewCurrentPage, newSizeDp)
                 },
                 onResetPosition = { viewModel.clearCustomPlacement(previewCurrentPage) },
                 onPreviousPage = { viewModel.changePreviewPage(previewCurrentPage - 1) },
@@ -352,7 +335,7 @@ fun SignPdfScreen(
                         OutlinedTextField(
                             value = targetPlaceholder,
                             onValueChange = { viewModel.updateTargetPlaceholder(it) },
-                            label = { Text("Placeholder Target (Text / AcroForm)") },
+                            label = { Text("Teks Placeholder Target") },
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -360,7 +343,7 @@ fun SignPdfScreen(
                             shape = RoundedCornerShape(10.dp),
                             singleLine = true,
                             supportingText = {
-                                Text("Default: \${ttd_pengirim1} (AcroForm atau teks)")
+                                Text("Pencarian teks murni. Jika 1 teks muncul 2+ kali, seluruhnya otomatis ditandatangani.")
                             }
                         )
                     }
@@ -496,23 +479,6 @@ fun SignPdfScreen(
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
-                            }
-                        }
-
-                        // Fallback Notice (if fallback was triggered)
-                        if (match.source == DetectionMethod.FALLBACK) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = AmberFallback.copy(alpha = 0.08f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, AmberFallback.copy(alpha = 0.3f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "Handling Fallback: Karena placeholder tidak ditemukan pada isi dokumen, QR Code secara aman ditempelkan pada sudut kanan bawah di halaman terakhir dokumen.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = AmberFallback,
-                                    modifier = Modifier.padding(10.dp)
-                                )
                             }
                         }
 

@@ -46,7 +46,7 @@ object TextPositionMatcher {
                     val matchedSubtext = matcher.group()
                     if (start in positions.indices && end <= positions.size && start < end) {
                         val matchChars = positions.subList(start, end)
-                        matches.add(createMatchFromChars(matchChars, pageIndex, pageHeight, matchedSubtext))
+                        matches.add(createMatchFromChars(matchChars, pageIndex, pageHeight, matchedSubtext, positions))
                     }
                 }
             } catch (e: Exception) {
@@ -64,7 +64,7 @@ object TextPositionMatcher {
                 val endIdx = (matchIdx + targetTextOrRegex.length).coerceAtMost(positions.size)
                 if (matchIdx < endIdx) {
                     val matchChars = positions.subList(matchIdx, endIdx)
-                    matches.add(createMatchFromChars(matchChars, pageIndex, pageHeight, targetTextOrRegex))
+                    matches.add(createMatchFromChars(matchChars, pageIndex, pageHeight, targetTextOrRegex, positions))
                 }
                 searchFromIndex = matchIdx + targetTextOrRegex.length.coerceAtLeast(1)
             }
@@ -89,7 +89,8 @@ object TextPositionMatcher {
         matchChars: List<CharPosition>,
         pageIndex: Int,
         pageHeight: Float,
-        matchedLabel: String
+        matchedLabel: String,
+        allPositions: List<CharPosition> = emptyList()
     ): PlaceholderMatch {
         val firstChar = matchChars.first()
         val minX = matchChars.minOf { it.x }
@@ -100,6 +101,28 @@ object TextPositionMatcher {
         // Convert Y from top-down to PDF standard bottom-up coordinate space
         val pdfY = (pageHeight - firstChar.y).coerceAtLeast(0f)
 
+        // Auto-Fit Calculation: Find text lines directly underneath the placeholder
+        val placeholderBottomTopDown = firstChar.y + maxHeight
+        val charsBelow = allPositions.filter { p ->
+            p.char.isNotBlank() &&
+            p.y > (placeholderBottomTopDown + 3f) &&
+            p.x >= (minX - 35f) && p.x <= (maxX + 90f)
+        }
+
+        val nearestCharBelow = charsBelow.minByOrNull { it.y }
+        val availableSpace = if (nearestCharBelow != null) {
+            (nearestCharBelow.y - placeholderBottomTopDown).coerceAtLeast(0f)
+        } else {
+            (pageHeight - 30f - placeholderBottomTopDown).coerceAtLeast(0f)
+        }
+        val textBelowPdfY = nearestCharBelow?.let { pageHeight - it.y }
+
+        val detailsMsg = if (nearestCharBelow != null) {
+            "Ditemukan '$matchedLabel' pada hal ${pageIndex + 1}. Auto-Fit: ruang kosong ${availableSpace.toInt()} pt terdeteksi."
+        } else {
+            "Ditemukan '$matchedLabel' via Text Search pada halaman ${pageIndex + 1} (X: ${minX.toInt()}, Y: ${pdfY.toInt()})"
+        }
+
         return PlaceholderMatch(
             pageIndex = pageIndex,
             x = minX,
@@ -107,7 +130,9 @@ object TextPositionMatcher {
             width = width,
             height = maxHeight,
             source = DetectionMethod.TEXT_SEARCH,
-            details = "Ditemukan '$matchedLabel' via Text Search pada halaman ${pageIndex + 1} (X: ${minX.toInt()}, Y: ${pdfY.toInt()})"
+            details = detailsMsg,
+            availableVerticalSpace = availableSpace,
+            textBelowPdfY = textBelowPdfY
         )
     }
 }

@@ -148,7 +148,67 @@ class PlaceholderSearchUnitTest {
             pageHeight = pageHeight
         )
 
-        assertNull("Jika placeholder tidak ada, harus mengembalikan null untuk memicu fallback", result)
+        assertNull("Jika placeholder tidak ada, harus mengembalikan null (tanpa fallback)", result)
+
+        val allResults = TextPositionMatcher.searchAllInPositions(
+            positions = positions,
+            targetTextOrRegex = "\${ttd_pengirim1}",
+            pageIndex = 0,
+            pageHeight = pageHeight
+        )
+        assertTrue("Hasil pencarian teks kosong jika tidak ditemukan", allResults.isEmpty())
+    }
+
+    @Test
+    fun testTextPositionSearch_oneIdenticalTextMultipleOccurrences() {
+        val pageHeight = 842f
+        val pageIndex = 0
+        val target = "\${ttd_pengirim1}"
+        val positions = mutableListOf<CharPosition>()
+
+        // 1st occurrence of ${ttd_pengirim1}
+        var curX = 50f
+        for (ch in target) {
+            positions.add(CharPosition(ch.toString(), curX, 300f, 9f, 12f, pageIndex, pageHeight))
+            curX += 9f
+        }
+
+        // Intermediary separator text
+        for (ch in " --- Pemisah Tanda Tangan --- ") {
+            positions.add(CharPosition(ch.toString(), curX, 300f, 7f, 12f, pageIndex, pageHeight))
+            curX += 7f
+        }
+
+        // 2nd occurrence of the EXACT SAME text ${ttd_pengirim1}
+        val expectedStartX2 = curX
+        for (ch in target) {
+            positions.add(CharPosition(ch.toString(), curX, 300f, 9f, 12f, pageIndex, pageHeight))
+            curX += 9f
+        }
+
+        // 3rd occurrence on another section (Y=500f)
+        var curX3 = 50f
+        for (ch in target) {
+            positions.add(CharPosition(ch.toString(), curX3, 500f, 9f, 12f, pageIndex, pageHeight))
+            curX3 += 9f
+        }
+
+        // Search for the 1 identical target text
+        val matches = TextPositionMatcher.searchAllInPositions(
+            positions = positions,
+            targetTextOrRegex = target,
+            pageIndex = pageIndex,
+            pageHeight = pageHeight
+        )
+
+        assertEquals("Harus mendeteksi ketiga kemunculan teks yang sama (1 teks 2+ multi TTD)", 3, matches.size)
+        assertEquals(50f, matches[0].x, 0.01f)
+        assertEquals(expectedStartX2, matches[1].x, 0.01f)
+        assertEquals(50f, matches[2].x, 0.01f)
+        assertEquals(pageHeight - 500f, matches[2].y, 0.01f)
+        assertEquals(DetectionMethod.TEXT_SEARCH, matches[0].source)
+        assertEquals(DetectionMethod.TEXT_SEARCH, matches[1].source)
+        assertEquals(DetectionMethod.TEXT_SEARCH, matches[2].source)
     }
 
     @Test
@@ -225,7 +285,16 @@ class PlaceholderSearchUnitTest {
         assertEquals(0, placement.pageIndex)
         assertEquals(0.7f, placement.normalizedX, 0.001f)
         assertEquals(0.8f, placement.normalizedY, 0.001f)
+        assertEquals(75f, placement.qrSizeDp, 0.001f)
         assertEquals(com.example.model.DetectionMethod.MANUAL_DRAG.name, "MANUAL_DRAG")
+
+        val customSizedPlacement = com.example.model.CustomQrPlacement(
+            pageIndex = 1,
+            normalizedX = 0.5f,
+            normalizedY = 0.5f,
+            qrSizeDp = 100f
+        )
+        assertEquals(100f, customSizedPlacement.qrSizeDp, 0.001f)
     }
 
     @Test
@@ -245,5 +314,53 @@ class PlaceholderSearchUnitTest {
         assertEquals("JO", com.example.ui.MainViewModel.computeInitials("John"))
         assertEquals("", com.example.ui.MainViewModel.computeInitials(""))
         assertEquals("", com.example.ui.MainViewModel.computeInitials("   "))
+    }
+
+    @Test
+    fun testQrCenterOverlayTypeValues() {
+        assertEquals("NONE", com.example.model.QrCenterOverlayType.NONE.name)
+        assertEquals("INITIALS", com.example.model.QrCenterOverlayType.INITIALS.name)
+        assertEquals("CUSTOM_LOGO", com.example.model.QrCenterOverlayType.CUSTOM_LOGO.name)
+    }
+
+    @Test
+    fun testAutoFitVerticalSpaceDetection() {
+        val pageHeight = 842f
+        val pageIndex = 0
+        val target = "\${ttd_pengirim1}"
+        val positions = mutableListOf<CharPosition>()
+
+        // Placeholder at top-down Y=300f, height=12f (bottom is 312f)
+        var curX = 60f
+        for (ch in target) {
+            positions.add(CharPosition(ch.toString(), curX, 300f, 9f, 12f, pageIndex, pageHeight))
+            curX += 9f
+        }
+
+        // Sentence/name below at top-down Y=362f (gap = 362 - 312 = 50f)
+        val nameText = "(Budi Santoso, S.T.)"
+        var nameX = 60f
+        for (ch in nameText) {
+            positions.add(CharPosition(ch.toString(), nameX, 362f, 8f, 12f, pageIndex, pageHeight))
+            nameX += 8f
+        }
+
+        val matches = TextPositionMatcher.searchAllInPositions(
+            positions = positions,
+            targetTextOrRegex = target,
+            pageIndex = pageIndex,
+            pageHeight = pageHeight
+        )
+
+        assertEquals(1, matches.size)
+        val match = matches.first()
+        assertNotNull(match.availableVerticalSpace)
+        assertEquals(50f, match.availableVerticalSpace!!, 0.5f)
+        assertNotNull(match.textBelowPdfY)
+        assertEquals(pageHeight - 362f, match.textBelowPdfY!!, 0.5f)
+
+        // Verify adaptive size: gap 50f -> size (50 - 8) = 42f (fits perfectly without collision)
+        val adaptiveSize = (match.availableVerticalSpace!! - 8f).coerceIn(38f, 85f)
+        assertEquals(42f, adaptiveSize, 0.5f)
     }
 }

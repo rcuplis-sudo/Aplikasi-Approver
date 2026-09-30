@@ -51,6 +51,7 @@ fun PdfPagePreviewCard(
     customPlacement: CustomQrPlacement?,
     onToggleManualMode: () -> Unit,
     onPositionChanged: (Float, Float) -> Unit,
+    onSizeChanged: (Float) -> Unit = {},
     onResetPosition: () -> Unit,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
@@ -173,33 +174,204 @@ fun PdfPagePreviewCard(
                 }
             }
 
-            // Interactive Instructions Banner
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (isManualPlacementMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            // Auto-Fit Adaptive Info (in Auto Mode)
+            if (!isManualPlacementMode) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(
-                        imageVector = if (isManualPlacementMode) Icons.Default.PanTool else Icons.Outlined.Description,
-                        contentDescription = null,
-                        tint = if (isManualPlacementMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (isManualPlacementMode) {
-                            "Sentuh & geser kotak QR ke letak tanda tangan yang diinginkan."
-                        } else {
-                            "Mencari posisi placeholder: $targetPlaceholder"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isManualPlacementMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (isManualPlacementMode) FontWeight.Medium else FontWeight.Normal
-                    )
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.AutoFixHigh,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Auto-Fit Adaptif Aktif",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Ukuran QR otomatis dihitung sesuai jarak ke kalimat di bawahnya agar tidak menutupi tulisan.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Interactive Instructions & Size Adjustment (in Manual Mode)
+            if (isManualPlacementMode) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = CardDefaults.outlinedCardBorder(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Title & Current Size Badge
+                        val currentSizeVal = customPlacement?.qrSizeDp ?: 75f
+                        val sizeCategory = when {
+                            currentSizeVal <= 55f -> "Kecil"
+                            currentSizeVal <= 85f -> "Sedang"
+                            currentSizeVal <= 110f -> "Besar"
+                            else -> "Ekstra Besar"
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Tune,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Ukuran QR Code",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    text = "$sizeCategory (${currentSizeVal.roundToInt()} dp)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+
+                        // Stepper & Slider
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    val next = (currentSizeVal - 10f).coerceAtLeast(45f)
+                                    onSizeChanged(next)
+                                },
+                                modifier = Modifier.size(36.dp),
+                                enabled = currentSizeVal > 45f
+                            ) {
+                                Icon(
+                                    Icons.Default.Remove,
+                                    contentDescription = "Perkecil ukuran QR",
+                                    tint = if (currentSizeVal > 45f) MaterialTheme.colorScheme.primary else Color.Gray,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Slider(
+                                value = currentSizeVal,
+                                onValueChange = { onSizeChanged(it) },
+                                valueRange = 45f..130f,
+                                steps = 16,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("qr_size_slider")
+                            )
+
+                            IconButton(
+                                onClick = {
+                                    val next = (currentSizeVal + 10f).coerceAtMost(130f)
+                                    onSizeChanged(next)
+                                },
+                                modifier = Modifier.size(36.dp),
+                                enabled = currentSizeVal < 130f
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = "Perbesar ukuran QR",
+                                    tint = if (currentSizeVal < 130f) MaterialTheme.colorScheme.primary else Color.Gray,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        // Preset buttons: Kecil (55dp), Sedang (75dp), Besar (100dp), Ekstra (125dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(
+                                Triple("Kecil", 55f, "55dp"),
+                                Triple("Sedang", 75f, "75dp"),
+                                Triple("Besar", 100f, "100dp"),
+                                Triple("Ekstra", 125f, "125dp")
+                            ).forEach { (label, presetVal, subLabel) ->
+                                val isSelected = kotlin.math.abs(currentSizeVal - presetVal) <= 6f
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { onSizeChanged(presetVal) },
+                                    label = {
+                                        Text(
+                                            text = "$label\n$subLabel",
+                                            fontSize = 10.sp,
+                                            lineHeight = 12.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "💡 Geser slider atau ketuk preset di atas untuk mengubah dimensi QR. Sentuh & seret kotak QR di bawah ke posisi dokumen yang diinginkan.",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Description,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Mencari posisi placeholder: $targetPlaceholder",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -258,7 +430,7 @@ fun PdfPagePreviewCard(
                         // Touch-and-drag overlay
                         val hasDimensions = imageContainerSize.width > 0 && imageContainerSize.height > 0
                         if (hasDimensions) {
-                            val qrOverlaySizeDp = 75.dp
+                            val qrOverlaySizeDp = (customPlacement?.qrSizeDp ?: 75f).dp
                             val qrSizePx = with(density) { qrOverlaySizeDp.toPx() }
 
                             val normX = customPlacement?.normalizedX ?: 0.65f
@@ -268,15 +440,15 @@ fun PdfPagePreviewCard(
                             val maxOffsetY = (imageContainerSize.height - qrSizePx).coerceAtLeast(0f)
 
                             var currentPixelX by remember(normX, imageContainerSize.width) {
-                                mutableStateOf(normX * maxOffsetX)
+                                mutableStateOf((normX * maxOffsetX).coerceIn(0f, maxOffsetX))
                             }
                             var currentPixelY by remember(normY, imageContainerSize.height) {
-                                mutableStateOf(normY * maxOffsetY)
+                                mutableStateOf((normY * maxOffsetY).coerceIn(0f, maxOffsetY))
                             }
 
-                            LaunchedEffect(normX, normY, imageContainerSize) {
-                                currentPixelX = normX * maxOffsetX
-                                currentPixelY = normY * maxOffsetY
+                            LaunchedEffect(normX, normY, imageContainerSize, qrOverlaySizeDp) {
+                                currentPixelX = (normX * maxOffsetX).coerceIn(0f, maxOffsetX)
+                                currentPixelY = (normY * maxOffsetY).coerceIn(0f, maxOffsetY)
                             }
 
                             val isInteractive = isManualPlacementMode
@@ -346,13 +518,31 @@ fun PdfPagePreviewCard(
                                         color = PrimaryBlueLight,
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
-                                            .size(18.dp)
-                                            .offset(x = 4.dp, y = (-4).dp)
+                                            .size(20.dp)
+                                            .offset(x = 5.dp, y = (-5).dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(
                                                 Icons.Default.OpenWith,
                                                 contentDescription = "Drag icon",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = EmeraldSuccess,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .size(20.dp)
+                                            .offset(x = 5.dp, y = 5.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.AspectRatio,
+                                                contentDescription = "Resize icon",
                                                 tint = Color.White,
                                                 modifier = Modifier.size(12.dp)
                                             )

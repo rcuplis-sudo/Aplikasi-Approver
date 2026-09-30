@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
 
 sealed interface SignUiState {
@@ -113,27 +115,89 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putString(KEY_PALETTE_STYLE, style.name).apply()
     }
 
-    // --- QR Center Logo / Initials Embedding Config ---
-    private val _qrOverlayConfig = MutableStateFlow(
-        QrOverlayConfig(
-            type = QrCenterOverlayType.NONE,
-            initials = computeInitials(_signerName.value)
+    // --- QR Center Logo / Initials Embedding Config (Persisted in SharedPreferences & Storage) ---
+    private val _qrOverlayConfig: MutableStateFlow<QrOverlayConfig> = run {
+        val savedTypeName = prefs.getString(KEY_OVERLAY_TYPE, null)
+        val initialType = try {
+            if (savedTypeName != null) QrCenterOverlayType.valueOf(savedTypeName) else QrCenterOverlayType.NONE
+        } catch (_: Exception) {
+            QrCenterOverlayType.NONE
+        }
+
+        val savedInitials = prefs.getString(KEY_OVERLAY_INITIALS, null)
+            ?: computeInitials(prefs.getString(KEY_SIGNER_NAME, "") ?: "")
+
+        val savedLogoPath = prefs.getString(KEY_OVERLAY_LOGO_FILE, null)
+        var loadedBitmap: Bitmap? = null
+        var loadedUri: Uri? = null
+
+        if (savedLogoPath != null) {
+            try {
+                val file = File(savedLogoPath)
+                if (file.exists()) {
+                    loadedBitmap = BitmapFactory.decodeFile(file.absolutePath)
+                    loadedUri = Uri.fromFile(file)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        val effectiveType = if (initialType == QrCenterOverlayType.CUSTOM_LOGO && loadedBitmap == null) {
+            QrCenterOverlayType.INITIALS
+        } else {
+            initialType
+        }
+
+        MutableStateFlow(
+            QrOverlayConfig(
+                type = effectiveType,
+                initials = savedInitials,
+                logoUri = loadedUri,
+                logoBitmap = loadedBitmap
+            )
         )
-    )
+    }
     val qrOverlayConfig: StateFlow<QrOverlayConfig> = _qrOverlayConfig.asStateFlow()
 
     fun updateOverlayType(type: QrCenterOverlayType) {
         _qrOverlayConfig.value = _qrOverlayConfig.value.copy(type = type)
+        prefs.edit().putString(KEY_OVERLAY_TYPE, type.name).apply()
     }
 
     fun updateOverlayInitials(initials: String) {
         _qrOverlayConfig.value = _qrOverlayConfig.value.copy(initials = initials)
+        prefs.edit().putString(KEY_OVERLAY_INITIALS, initials).apply()
     }
 
     fun updateOverlayLogo(uri: Uri?, bitmap: Bitmap?) {
+        val targetType = if (bitmap != null) QrCenterOverlayType.CUSTOM_LOGO else QrCenterOverlayType.INITIALS
+        val logoFile = File(getApplication<Application>().filesDir, "qr_custom_logo.png")
+        if (bitmap != null) {
+            try {
+                FileOutputStream(logoFile).use { fos ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                }
+                prefs.edit()
+                    .putString(KEY_OVERLAY_TYPE, targetType.name)
+                    .putString(KEY_OVERLAY_LOGO_FILE, logoFile.absolutePath)
+                    .apply()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        } else {
+            try {
+                if (logoFile.exists()) logoFile.delete()
+            } catch (_: Exception) {}
+            prefs.edit()
+                .putString(KEY_OVERLAY_TYPE, targetType.name)
+                .remove(KEY_OVERLAY_LOGO_FILE)
+                .apply()
+        }
+
         _qrOverlayConfig.value = _qrOverlayConfig.value.copy(
-            type = if (bitmap != null) QrCenterOverlayType.CUSTOM_LOGO else QrCenterOverlayType.INITIALS,
-            logoUri = uri,
+            type = targetType,
+            logoUri = if (bitmap != null) Uri.fromFile(logoFile) else null,
             logoBitmap = bitmap
         )
     }
@@ -170,14 +234,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setQrPlacement(pageIndex: Int, normX: Float, normY: Float) {
+    fun setQrPlacement(pageIndex: Int, normX: Float, normY: Float, sizeDp: Float? = null) {
         val current = _customPlacements.value.toMutableMap()
+        val existing = current[pageIndex]
+        val finalSize = sizeDp ?: existing?.qrSizeDp ?: 75f
         current[pageIndex] = CustomQrPlacement(
             pageIndex = pageIndex,
-            normalizedX = normX.coerceIn(0.02f, 0.85f),
-            normalizedY = normY.coerceIn(0.02f, 0.85f)
+            normalizedX = normX.coerceIn(0.01f, 0.95f),
+            normalizedY = normY.coerceIn(0.01f, 0.95f),
+            qrSizeDp = finalSize.coerceIn(45f, 130f)
         )
         _customPlacements.value = current
+    }
+
+    fun updateQrPlacementSize(pageIndex: Int, sizeDp: Float) {
+        val current = _customPlacements.value.toMutableMap()
+        val existing = current[pageIndex]
+        if (existing != null) {
+            current[pageIndex] = existing.copy(qrSizeDp = sizeDp.coerceIn(45f, 130f))
+            _customPlacements.value = current
+        } else {
+            setQrPlacement(pageIndex, 0.65f, 0.75f, sizeDp)
+        }
     }
 
     fun clearCustomPlacement(pageIndex: Int? = null) {
@@ -199,7 +277,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _signerName.value = signer
         prefs.edit().putString(KEY_SIGNER_NAME, signer).apply()
         val newInitials = computeInitials(signer)
-        if (_qrOverlayConfig.value.type == QrCenterOverlayType.INITIALS && newInitials.isNotBlank()) {
+        val hasCustomInitials = prefs.contains(KEY_OVERLAY_INITIALS)
+        if (!hasCustomInitials && _qrOverlayConfig.value.type == QrCenterOverlayType.INITIALS && newInitials.isNotBlank()) {
             _qrOverlayConfig.value = _qrOverlayConfig.value.copy(initials = newInitials)
         }
     }
@@ -428,14 +507,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val f1 = PdfSampleGenerator.generateSample(getApplication(), PdfSampleGenerator.SampleType.MULTI_PLACEHOLDER)
                 val f2 = PdfSampleGenerator.generateSample(getApplication(), PdfSampleGenerator.SampleType.TEXT_PLACEHOLDER)
-                val f3 = PdfSampleGenerator.generateSample(getApplication(), PdfSampleGenerator.SampleType.ACROFORM_FIELD)
-                val f4 = PdfSampleGenerator.generateSample(getApplication(), PdfSampleGenerator.SampleType.NO_PLACEHOLDER_FALLBACK)
 
                 val sampleItems = listOf(
-                    BatchFileItem(UUID.randomUUID().toString(), "Kontrak_Multi_2_Pihak.pdf", f1, details = "2 Placeholder (${'$'}{ttd_pengirim1} & ${'$'}{ttd_pengirim2})"),
-                    BatchFileItem(UUID.randomUUID().toString(), "Surat_Keputusan_Teks.pdf", f2, details = "1 Placeholder teks (${'$'}{ttd_pengirim1})"),
-                    BatchFileItem(UUID.randomUUID().toString(), "Formulir_AcroForm.pdf", f3, details = "AcroForm Field 'ttd_pengirim1'"),
-                    BatchFileItem(UUID.randomUUID().toString(), "Dokumen_Umum_Fallback.pdf", f4, details = "Tanpa placeholder (Fallback test)")
+                    BatchFileItem(UUID.randomUUID().toString(), "Kontrak_Multi_TTD_2x.pdf", f1, details = "1 Teks ${'$'}{ttd_pengirim1} muncul 2 kali (Multi-TTD)"),
+                    BatchFileItem(UUID.randomUUID().toString(), "Surat_Keputusan_1_Teks.pdf", f2, details = "1 Placeholder teks (${'$'}{ttd_pengirim1})")
                 )
 
                 _batchState.value = BatchProgressState(
@@ -555,6 +630,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_SIGNER_NAME = "saved_signer_name"
         private const val KEY_THEME_MODE = "saved_theme_mode"
         private const val KEY_PALETTE_STYLE = "saved_palette_style"
+        private const val KEY_OVERLAY_TYPE = "saved_overlay_type"
+        private const val KEY_OVERLAY_INITIALS = "saved_overlay_initials"
+        private const val KEY_OVERLAY_LOGO_FILE = "saved_overlay_logo_file"
 
         fun computeInitials(name: String): String {
             val parts = name.trim().split("\\s+".toRegex()).filter { it.isNotEmpty() }
